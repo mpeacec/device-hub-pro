@@ -69,7 +69,7 @@ final class AvdCatalogController {
 
     // MARK: - Gallery
 
-    /// Light hot-plug pass (spec §6.4): only the `ps`-based running-emulator
+    /// Light hot-plug pass: only the `ps`-based running-emulator
     /// half of `refreshGallery()` — no skin catalog scan — so externally
     /// killed or started VMs stop sticking `avdIsBooting` on a stale card.
     /// Serials are reconciled too: a stopped VM's serial is dropped (the next
@@ -265,6 +265,13 @@ final class AvdCatalogController {
             return AvdmanagerError.avdAlreadyExists(existing).description
         } catch {
             return "\(error)"
+        }
+        // An older avdmanager names a newer image's Android version 0.
+        if let emulator = EmulatorManager.locateBinary() {
+            _ = try? EmulatorPreflight.repairTarget(
+                avdName: name,
+                sdkRoots: EmulatorPreflight.sdkRoots(emulatorURL: emulator)
+            )
         }
         if let problem = Self.completeNewAvdConfig(
             avdName: name,

@@ -178,11 +178,15 @@ private struct AppCommands: Commands {
         return NSApp.keyWindow === compact
     }
 
+    /// Off while the stage shows a foldable in 3D: the model has a zoom of
+    /// its own, and the stage zoom's scale modes measure the 2D screen.
     private var zoomAvailable: Bool {
-        stageZoomIsAvailable(
+        guard stageZoomIsAvailable(
             liveSelectionSerial: workspace?.liveSelectionSerial,
             hasSession: workspace?.selectedDeviceHasSession ?? false
-        )
+        ) else { return false }
+        guard let workspace, let model else { return true }
+        return !DeviceModelStageView.isShown(in: workspace, model: model)
     }
 
     var body: some Commands {
@@ -352,6 +356,31 @@ private struct AppCommands: Commands {
                     get: { model?.preferences.showNavigationButtons ?? true },
                     set: { model?.preferences.setShowNavigationButtons($0) }
                 ))
+
+                Divider()
+            }
+
+            // A foldable simulator shows as Device Hub draws it, from the
+            // front; its 3D model turns and zooms here. Listed only where
+            // Xcode ships the model.
+            if workspace?.simulatorFold.deviceModel != nil {
+                Toggle("Show 3D Model", isOn: Binding(
+                    get: { model?.preferences.showDeviceModel ?? false },
+                    set: { model?.preferences.setShowDeviceModel($0) }
+                ))
+                if model?.preferences.showDeviceModel == true {
+                    Button("Turn Around") { workspace?.simulatorFold.turnAround() }
+                }
+                // The model's two finishes: Device Hub's dark one unless
+                // chosen.
+                Menu("Device Color") {
+                    ForEach(AppleDeviceModel.colors, id: \.self) { color in
+                        Toggle(color, isOn: Binding(
+                            get: { model?.preferences.deviceModelColor == color },
+                            set: { if $0 { model?.preferences.setDeviceModelColor(color) } }
+                        ))
+                    }
+                }
 
                 Divider()
             }

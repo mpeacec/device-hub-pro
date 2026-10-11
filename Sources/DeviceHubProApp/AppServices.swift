@@ -55,6 +55,8 @@ final class AppServices {
     /// clipboard auto-sync: one read per tick, fanned out
     /// to every workspace, instead of one per window.
     let clipboardPoll: ClipboardPasteboardPoll
+    /// Simulate Hardware Keyboard, per simulator, shared by every window.
+    let simulatorHardwareKeyboard: SimulatorHardwareKeyboardController
     /// Maestro for every window's Flows panel: the CLI, its install and the
     /// flows folder (Settings ▸ Maestro).
     let maestro: MaestroSetupController
@@ -98,6 +100,7 @@ final class AppServices {
         self.recentAPKs = RecentAPKStore(defaults: environment.defaults)
         self.recentLinks = RecentLinkStore(defaults: environment.defaults)
         self.clipboardPoll = ClipboardPasteboardPoll(pasteboard: environment.pasteboard, isAppActive: environment.isAppActive)
+        self.simulatorHardwareKeyboard = SimulatorHardwareKeyboardController(simulators: simulators, preferences: preferences)
         self.maestro = MaestroSetupController(tooling: environment.maestro, preferences: preferences)
     }
 

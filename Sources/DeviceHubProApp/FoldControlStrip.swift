@@ -9,6 +9,15 @@ protocol FoldControlDriving: AnyObject {
     var hingeAngle: Double? { get }
     func setPostureAnimated(_ posture: PostureKind)
     func setHingeAngle(_ degrees: Double)
+    /// Postures past Apple's presets the device can be put in (a foldable
+    /// simulator's laptop and tent); none by default.
+    var heldPostures: [SimulatorHeldPosture] { get }
+    func setHeldPosture(_ posture: SimulatorHeldPosture)
+}
+
+extension FoldControlDriving {
+    var heldPostures: [SimulatorHeldPosture] { [] }
+    func setHeldPosture(_ posture: SimulatorHeldPosture) {}
 }
 
 @MainActor
@@ -31,7 +40,7 @@ enum FoldStripActions {
     }
 }
 
-/// The stage's fold controls (spec §9): posture presets and the 0–180° hinge
+/// The stage's fold controls: posture presets and the 0–180° hinge
 /// slider — the reference simulator strip's counterpart.
 struct FoldControlStrip: View {
     let driver: any FoldControlDriving
@@ -85,7 +94,7 @@ struct FoldControlStrip: View {
             // Presets stay enabled without gRPC:
             // `EmulatorHardwareController.runPostureAnimation` falls back to
             // the emulator console's `posture` command (pinned there), so they
-            // settle even console-only (spec §10).
+            // settle even console-only.
             ForEach(PostureKind.allCases) { posture in
                 Button {
                     FoldStripActions.presetTapped(posture, driver: driver)
@@ -99,6 +108,20 @@ struct FoldControlStrip: View {
                     }
                 }
                 .help("\(posture.label): hinge \(posture.angleRange)")
+            }
+            ForEach(driver.heldPostures) { posture in
+                Button {
+                    driver.setHeldPosture(posture)
+                } label: {
+                    if compaction.showsLabels {
+                        Image(systemName: posture.systemImage)
+                        Text(posture.label)
+                    } else {
+                        Image(systemName: posture.systemImage)
+                            .accessibilityLabel(posture.label)
+                    }
+                }
+                .help("\(posture.label): on its side, hinge \(Int(posture.angle))°")
             }
             if let sliderWidth = compaction.sliderWidth {
                 if showsSlider {

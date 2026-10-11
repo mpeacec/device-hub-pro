@@ -54,6 +54,8 @@ enum NavigationBarSpec {
 struct StageAccessoryStrip: View {
     @Environment(DeviceWorkspace.self) private var workspace
     let showsNavigation: Bool
+    /// A foldable emulator's fold strip (a foldable simulator's postures sit
+    /// in the stage's pill).
     let showsFold: Bool
 
     var body: some View {
@@ -64,6 +66,7 @@ struct StageAccessoryStrip: View {
                 }
             }
             if showsFold {
+                // The hinge's slider needs the emulator's console port.
                 FoldControlStrip(driver: workspace.hardware, showsSlider: workspace.context.port != nil)
             }
         }

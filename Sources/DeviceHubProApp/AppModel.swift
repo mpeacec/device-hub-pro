@@ -676,7 +676,7 @@ final class AppModel {
         workspace.lifecycleIfRunning?.noteReconnectRequested(serial: serial)
     }
 
-    /// The auto-resume hook (spec §5.2; `DeviceWorkspace.lifecycleResume`).
+    /// The auto-resume hook (`DeviceWorkspace.lifecycleResume`).
     func lifecycleResume(serial: String) async {
         await workspace.lifecycleResume(serial: serial)
     }
@@ -893,7 +893,14 @@ final class AppModel {
                     return content
                 }
             }
-            return await SimulatorLifecycleController.screenshotContent(udid, simctl)
+            // A foldable's lit panel is the display to look at (simctl's
+            // default is iPhone Duo's inner one, dark while it is closed): its
+            // panels are read here when no stage has drawn the device yet.
+            let simulators = self.services.simulators
+            if let entry = simulators.entry(udid: udid) { await simulators.loadDisplayShape(for: entry) }
+            return await SimulatorLifecycleController.screenshotContent(
+                udid, simctl, display: simulators.captureDisplay(udid: udid)
+            )
         }
         // The canvas's session half (its begin and teardown hooks, the
         // stopped session, the display) and the rest of the per-device

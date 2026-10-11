@@ -92,7 +92,7 @@ struct DeviceStageView: View {
         }
     }
 
-    /// The AVD panels (spec §6.4): stopped keeps the skin hero + Start,
+    /// The AVD panels: stopped keeps the skin hero + Start,
     /// booting gets the same hero plus progress and the "Starting…" label.
     @ViewBuilder
     private func avdStage(card: AvdCard) -> some View {
@@ -152,7 +152,7 @@ enum DeviceStagePanelText {
 }
 
 /// Android-designed panels for physical devices adb cannot use. Device Hub
-/// had no unhealthy device to reference (spec §6.4), so there is no visual
+/// had no unhealthy device to reference, so there is no visual
 /// reference to copy.
 private struct DeviceStatusPanel: View {
     @Environment(AppModel.self) private var model
@@ -946,7 +946,7 @@ private struct MirrorStatsHUD: View {
 // MARK: - Recording indicator
 
 /// Red dot + REC + elapsed time in a glass capsule over the mirror, shown
-/// only while the host recorder runs (spec §8.3) — it ends the moment the
+/// only while the host recorder runs — it ends the moment the
 /// recorder does. Device Hub's record button has no elapsed readout, so this
 /// is our own design.
 private struct RecordingIndicator: View {
@@ -1148,7 +1148,10 @@ private struct MirrorContainer: View {
         zoomableStage(visible: visible, stage: stage, topInset: topInset)
             // Not 0: a fully transparent view stops drawing, and the Metal layer
             // would then show its stale contents for a frame or two on reveal.
-            .opacity(hidesUntilZoomSettles || isSettlingNewSession ? 0.001 : 1)
+            // The 3D model stays: it draws no video to settle (it would wait
+            // out the fallback), keeps the device in view while the panels
+            // switch, and folds on screen.
+            .opacity((hidesUntilZoomSettles || isSettlingNewSession) && !showsDeviceModel ? 0.001 : 1)
             .onChange(of: liveSessionID, initial: true) { _, _ in revealWhenSettled() }
             .onChange(of: stageSettled) { _, _ in revealWhenSettled() }
             .onChange(of: workspace.mirror.mirrorViewState.videoPointsPerPixel) { _, _ in revealWhenSettled() }
@@ -1187,9 +1190,16 @@ private struct MirrorContainer: View {
         }
     }
 
+    /// A foldable simulator in its 3D model fills the stage whatever the
+    /// zoom: the zoom's scale modes measure the 2D screen's drawn pixels,
+    /// which the model does not draw, and would shrink it to a speck.
+    private var showsDeviceModel: Bool {
+        DeviceModelStageView.isShown(chrome: chrome, workspace: workspace, preferences: model.preferences)
+    }
+
     @ViewBuilder
     private func zoomableStage(visible: CGSize, stage: CGSize, topInset: CGFloat) -> some View {
-        if let zoom = workspace.window.stageZoom {
+        if let zoom = workspace.window.stageZoom, !showsDeviceModel {
             ScrollView([.horizontal, .vertical]) {
                 content(available: CGSize(
                     width: visible.width * zoom,
@@ -1233,7 +1243,9 @@ private struct MirrorContainer: View {
             session: session,
             chrome: chrome,
             available: available,
+            // A foldable simulator's postures sit in the stage's pill.
             showsFoldControls: workspace.hardware.showsFoldControls,
+            showsFoldableModel: workspace.simulatorFold.showsFoldControls,
             showsNavigationBar: NavigationBarSpec.isShown(
                 preference: model.preferences.showNavigationButtons,
                 device: workspace.context.device,
@@ -1259,8 +1271,11 @@ struct MirrorStageContent: View {
     let chrome: DeviceChrome
     let available: CGSize
     /// Main stage only: `CompactMirrorView` keeps the default `false` and
-    /// stays flat (spec §13).
+    /// stays flat.
     var showsFoldControls = false
+    /// Main stage only: a foldable simulator in its 3D model
+    /// (`DeviceModelStageView`); the compact window keeps its 2D chrome.
+    var showsFoldableModel = false
     /// Main stage only: the Back / Home / Recents bar under an Android
     /// handheld (`NavigationBarSpec.isShown`).
     var showsNavigationBar = false
@@ -1271,6 +1286,59 @@ struct MirrorStageContent: View {
     /// The fold strip, the navigation bar, or both sit under the device.
     private var showsAccessoryStrip: Bool { showsFoldControls || showsNavigationBar }
 
+    /// The clockwise quarter turns that show a frame on a 3D model's panel
+    /// as the panel shows it in its resting pose: the 2D chrome's turn to the
+    /// native panel (`AppleChromeDeviceView.textureTurns`, clockwise as the
+    /// mirror's shader samples it), less the counter-clockwise quarter turns
+    /// the panel rests at (iPhone Duo's open panel is mounted a quarter turn
+    /// round). The device pose's own turn rolls the whole model instead.
+    static func modelPanelTurns(
+        frame: AppleChromeFrame,
+        session: any MirrorSessionProtocol,
+        devicePose: StagePoseAnimator,
+        restingTurns: Int
+    ) -> (Int, Int) -> Int {
+        let native = AppleChromeDeviceView.textureTurns(frame: frame, session: session, devicePose: devicePose)
+        return { width, height in
+            (((native(width, height) - restingTurns) % 4) + 4) % 4
+        }
+    }
+
+    /// A foldable's front-on 3D model as the stage sizes it: as tall (view
+    /// points) as Device Hub draws it, and the points per pixel of its
+    /// closed 2D frame that makes. Device Hub's Zoom to Fit leaves room for
+    /// the open device turned any way (its bounding sphere): iPhone Duo
+    /// `frontFitHeight` of the fit area's height tall, or `frontFitWidth` of
+    /// its width when that is less, and one size in every posture (Xcode
+    /// 27.1, 2026-10-11: closed, its outline 446.5–448.7 pt high in a window
+    /// 930 pt high, where our fit area is 806.7 pt; 349.3 pt in one 903 pt
+    /// wide, ours 635 pt). The model's outline stands 0.85 % taller than
+    /// `height` (its keys, its frame nearer the camera than its panel). The
+    /// stage's zoom scales the area, so its scale modes keep their meaning.
+    static let frontFitHeight: CGFloat = 0.550
+    static let frontFitWidth: CGFloat = 0.5455
+
+    static func frontModel(outerFrame: AppleChromeFrame, available: CGSize) -> (height: CGFloat, pointsPerPixel: CGFloat) {
+        let native = DeviceCompositionPlanner.appleChrome(outerFrame).layoutSize
+        let height = max(min(available.height * frontFitHeight, available.width * frontFitWidth), 1)
+        return (height, height / max(native.height, 1))
+    }
+
+    /// Publishes the front-on model's scale in its outer panel's pixels,
+    /// the frame the stage zoom's scale modes count in.
+    private func publishFrontScale(_ scale: CGFloat) {
+        guard workspace.simulatorFold.deviceModel != nil, !model.preferences.showDeviceModel,
+              let outer = workspace.simulatorFold.outerPanelPixels
+        else { return }
+        let state = workspace.mirror.mirrorViewState
+        if state.devicePixelSize != outer { state.devicePixelSize = outer }
+        state.publishVideoScale(Double(scale))
+    }
+
+    private func front(_ frame: AppleChromeFrame) -> (height: CGFloat, pointsPerPixel: CGFloat) {
+        Self.frontModel(outerFrame: workspace.simulatorFold.outerChrome ?? frame, available: available)
+    }
+
     var body: some View {
         ZStack {
             if workspace.window.showDeviceFrame {
@@ -1278,7 +1346,63 @@ struct MirrorStageContent: View {
                 case .skin(let skin):
                     framedContent(skin: skin)
                 case .appleChrome(let frame):
-                    AppleChromeDeviceView(session: session, frame: frame, available: available)
+                    if showsFoldableModel {
+                        // A foldable simulator (iPhone Duo) as Device Hub
+                        // 27.1 draws it: its 3D model seen from the front
+                        // through a long lens, as tall as its open 2D frame;
+                        // turned and zoomed with View ▸ Show 3D Model; its 2D
+                        // chrome where Xcode ships no model. The postures sit
+                        // in the stage's pill.
+                        Group {
+                            if let deviceModel = workspace.simulatorFold.deviceModel {
+                                DeviceModelStageView(
+                                    model: deviceModel,
+                                    session: session,
+                                    opening: workspace.simulatorFold.hingeAngle ?? 0,
+                                    foldProgress: { [fold = workspace.simulatorFold] in fold.foldProgress() },
+                                    litPanel: workspace.simulatorFold.litPanel,
+                                    presentation: model.preferences.showDeviceModel
+                                        ? .free
+                                        : .front(height: front(frame).height),
+                                    color: model.preferences.deviceModelColor,
+                                    size: available,
+                                    panelTurns: Self.modelPanelTurns(
+                                        frame: frame,
+                                        session: session,
+                                        devicePose: workspace.simulatorCanvas.devicePose,
+                                        restingTurns: workspace.simulatorFold.restingTurns
+                                    ),
+                                    roll: ((workspace.simulatorCanvas.devicePose.targetTurns
+                                        - workspace.simulatorFold.restingTurns) % 4 + 4) % 4,
+                                    spinRequests: workspace.simulatorFold.spinRequests
+                                )
+                                // A new finish is a new model: the stage loads it.
+                                .id(model.preferences.deviceModelColor)
+                                .frame(width: available.width, height: available.height)
+                                .offset(y: model.preferences.showDeviceModel ? 0 : -ParityMetrics.foldModelLift)
+                            } else {
+                                AppleChromeDeviceView(session: session, frame: frame, available: available)
+                            }
+                        }
+                        .task(id: ObjectIdentifier(session)) { workspace.simulatorFold.prepareFold() }
+                        // The front-on model draws the outer panel as its 2D
+                        // chrome would, whichever panel is lit: the stage
+                        // zoom's scale modes (Physical Size, Point Accurate)
+                        // count in that panel and scale, so iPhone Duo opens
+                        // at its 2D size and keeps it in every posture, as in
+                        // Device Hub.
+                        // A session that moves to the inner panel sets its own
+                        // size (the mirror's seed picture): put the outer one
+                        // back, or Physical Size went grey with the device open.
+                        .onChange(of: front(frame).pointsPerPixel, initial: true) { _, scale in
+                            publishFrontScale(scale)
+                        }
+                        .onChange(of: workspace.mirror.mirrorViewState.devicePixelSize) { _, _ in
+                            publishFrontScale(front(frame).pointsPerPixel)
+                        }
+                    } else {
+                        AppleChromeDeviceView(session: session, frame: frame, available: available)
+                    }
                 case .vector:
                     if let pixels = Self.vectorPixels(
                         settled: workspace.mirror.mirrorViewState.devicePixelSize,
@@ -1318,7 +1442,7 @@ struct MirrorStageContent: View {
         .modifier(ViewOnlyCanvasVisibility(session: session))
     }
 
-    /// The framed branch (spec §9): the flat framed mirror, with the fold
+    /// The framed branch: the flat framed mirror, with the fold
     /// control strip anchored at the bottom while the stage shows a foldable
     /// emulator (spec acceptance #3), and the device fitted above it.
     private func framedContent(skin: ResolvedSkin) -> some View {
@@ -1450,6 +1574,8 @@ struct MirrorStageContent: View {
             margin: 1.0,
             allowsUpscaling: true,
             forwardsKeyboard: model.preferences.keyboardForwardingEnabled,
+            capturesShortcuts: model.preferences.captureKeyboardShortcuts,
+            securesKeyboard: model.preferences.secureKeyboardEntry,
             cornerRadius: corners.screen,
             uprightsTexture: true
         )
@@ -1472,6 +1598,8 @@ struct MirrorStageContent: View {
             state: workspace.mirror.mirrorViewState,
             margin: margin,
             forwardsKeyboard: model.preferences.keyboardForwardingEnabled,
+            capturesShortcuts: model.preferences.captureKeyboardShortcuts,
+            securesKeyboard: model.preferences.secureKeyboardEntry,
             // A physical iPhone's chrome that is not read yet, with no
             // picture remembered: the stage's own background shows until
             // the first frame sizes the device, not a stage-sized gray box

@@ -288,7 +288,7 @@ final class AppleControlsController {
             if let reading = try? await backend.read(read) { readings.append(reading) }
         }
         guard generation == attachGeneration else { return generation }
-        for reading in readings { state.apply(reading) }
+        for reading in readings { apply(reading) }
         capabilityRevision += 1
         isLoaded = true
         return generation
@@ -326,7 +326,7 @@ final class AppleControlsController {
         }
         let (readZone, readList, readScenarios) = await (zone, barList, scenarios)
         guard generation == attachGeneration else { return }
-        for reading in readings { state.apply(reading) }
+        for reading in readings { apply(reading) }
         if let readZone { bootTimeZone = .some(readZone) }
         if let readList {
             statusBarActive = !readList.isEmpty
@@ -363,7 +363,7 @@ final class AppleControlsController {
         let answer = try? await active.read(read)
         syncCapabilities()
         guard let reading = answer, generation == writeGeneration, attach == attachGeneration else { return }
-        state.apply(reading)
+        apply(reading)
     }
 
     /// A physical device's backend records a feature a call found
@@ -399,7 +399,7 @@ final class AppleControlsController {
             let answer = try await active.apply(change)
             guard self.udid == udid else { return true }
             if let answer {
-                state.apply(answer)
+                apply(answer)
             } else {
                 applyExpected(change)
             }
@@ -502,6 +502,8 @@ final class AppleControlsController {
         case .statusBar(let model):
             if let model { memory.statusBars[udid] = model }
             if self.udid == udid { statusBarActive = model != nil }
+        case .statusBarBattery:
+            if self.udid == udid { statusBarActive = true }
         default:
             break
         }
@@ -533,7 +535,33 @@ final class AppleControlsController {
 
     // Sensors, Advanced
 
-    func setPose(_ pose: SimulatorDevicePose) async { await perform(.orientation(pose), "change the orientation") }
+    /// Holds a foldable simulator as a pose (`SimulatorFoldController
+    /// .setHeldPose`); false for any other device, which devicectl turns.
+    @ObservationIgnored var holdFoldable: (@MainActor (_ udid: String, _ pose: SimulatorDevicePose) -> Bool)?
+
+    func setPose(_ pose: SimulatorDevicePose) async {
+        if let udid, !isPhysical, holdFoldable?(udid, pose) == true { return }
+        await perform(.orientation(pose), "change the orientation")
+    }
+
+    /// The fold strip or the stage's rotate held the foldable `udid` as
+    /// `pose` (the fold book records it): Device ▸ Orientation checks it.
+    func noteHeldPose(_ pose: SimulatorDevicePose, udid: String) {
+        guard self.udid == udid else { return }
+        state.pose = pose
+    }
+
+    /// A reading, with a held foldable's pose from the fold book over
+    /// devicectl's (which does not follow the orientation picker: iPhone Duo
+    /// held face up read `landscapeRight`, held portrait `landscapeLeft`).
+    /// The book forgets a simulator that shut down: it boots upright, and
+    /// devicectl reads it again.
+    private func apply(_ reading: AppleControlsReading) {
+        state.apply(reading)
+        if let udid, let held = simulators.folds.records[udid]?.pose {
+            state.pose = held
+        }
+    }
     func setBiometricsEnrolled(_ enrolled: Bool) async { await perform(.biometricsEnrolled(enrolled), "change the enrolment") }
 
     /// A match or non-match request kept until the simulator shows its
@@ -758,6 +786,31 @@ final class AppleControlsController {
             // The flag is the attached simulator's; another may be attached now.
             if self.udid == udid { statusBarActive = on }
         }
+    }
+
+    /// Device ▸ Battery's levels, as Device Hub offers them.
+    static let batteryMenuLevels = [100, 75, 50, 25]
+
+    /// The level Device ▸ Battery checks: the status bar override's, 100
+    /// without one (what the simulator shows), as in Device Hub.
+    var batteryMenuLevel: Int { statusBarActive == true ? statusBar.batteryLevel : 100 }
+
+    /// Device ▸ Battery: only the status bar's battery, at `level` %,
+    /// discharging (the override Device Hub's menu sets); the time and the
+    /// rest stay as they are. The model is read back for the panel.
+    func setBatteryLevel(_ level: Int) async {
+        guard let udid else { return }
+        guard await perform(.statusBarBattery(level: level, state: .discharging), "set the battery") else { return }
+        var model = statusBar
+        model.batteryLevel = level
+        model.batteryState = .discharging
+        if let backend, backend.udid == udid,
+           let list = try? await backend.simctl.statusBarOverrides(udid: udid),
+           let read = SimulatorStatusBarState.fromList(list, over: model) {
+            model = read
+        }
+        memory.statusBars[udid] = model
+        if self.udid == udid { statusBarActive = true }
     }
 
     /// Clean status bar: on applies the Screenshot look over a fresh model

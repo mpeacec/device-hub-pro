@@ -136,7 +136,8 @@ When the tools are installed, the app offers to create your first emulator.
   simulator's Settings panel is Device Hub's three cards followed by collapsed groups); appearance, text size, reduce
   motion, TalkBack, colour filters, contrast and developer toggles. The device settings are in the Device menu as
   well, on every platform: Accessibility, Appearance, Location, Sound, Language (with 24-hour time), Time Zone and
-  Clean Status Bar (a simulator adds Face ID, push, permissions and Open URL), so each has a menu path and a key where
+  Clean Status Bar (a simulator adds Face ID, push, permissions, Open URL and, as in Device Hub, Battery: the status
+  bar's battery at 100, 75, 50 or 25 %), so each has a menu path and a key where
   one exists. An item the device has no hardware for is left out, read from the device itself (`pm list features`): no
   fingerprint touch on a Wear OS watch, no telephony, Shake or Split Screen on a TV. Rows show what the device
   actually does: Force RTL applies at once on Android 8+ (the language list is pushed
@@ -149,6 +150,30 @@ When the tools are installed, the app offers to create your first emulator.
   (`hw.resizable.configs` in `config.ini`) the toolbar's Resize mode button and Device ▸
   Enter Resize Mode offer the emulator's display presets (the New Emulator menus do not
   offer the Resizable profile).
+- **Foldable simulators (iPhone Duo, Xcode 27.1).** The stage's pill folds it, as Xcode's
+  Device Hub does: Rotate shares a capsule with Closed, Partially Open and Open (Device Hub's own
+  glyphs, read from the user's Xcode), and Laptop and Tent (half open on its side) sit beside
+  them; the current posture shows in the accent colour. Device ▸ Fold / Unfold does the same from
+  the menu. As in Device Hub, a preset moves the hinge over about half a second (apps see the
+  fold, not a jump) and Partially Open opens to Device Hub's angle; Device ▸ Orientation holds it
+  portrait, upside down, landscape left or right, face up or face down, and Rotate turns it. The
+  stage follows the lit panel: the outer one closed, the inner one open. The app remembers the
+  fold while the simulator stays booted, so quitting and opening it again shows the device as it
+  was left; a simulator something else opened (Device Hub, a test) is read off its two panels'
+  screenshots, and the stage shows the lit one. Where the selected Xcode ships Apple's 3D model of
+  the device, the stage draws it as Device Hub does: seen from the front through a long lens, its
+  body in neutral greys under one even light (its dark finish by default; View ▸ Device Color picks
+  the light one), the black round each panel pure black, centred and sized as Device Hub's Zoom to
+  Fit and Physical Size draw it (the stage's zoom and scale modes size it) and one size in every
+  posture; the hinge folds on screen where the simulator's hinge is at each frame, the panel going
+  dark keeping its last picture, blurred, until it stops; the lit panel shows the live simulator's
+  own colours to its rounded edges and takes clicks, drags and, with Keyboard
+  Capture, typing; its volume and side buttons move out under the pointer and in on a click (held
+  as long as the click is), as a device frame's keys do. View ▸ Show 3D Model lets the mouse turn
+  it (a drag anywhere off the panel; a pinch or a scroll zooms, a double click faces it again,
+  and View ▸ Turn Around shows its back), the hinge's angle beside it while it folds. The model is
+  read from the user's Xcode at runtime, never copied (`DHP_DISABLE_DEVICE_MODEL=1` turns it off,
+  and the device shows in its 2D frame).
 - **Language & time.** A Controls group for emulators and phones; a row is hidden
   when the device lacks its mechanism. Language is a searchable picker over the
   device's own language list (Android 8+), with suggested languages and Restore,
@@ -320,7 +345,15 @@ When the tools are installed, the app offers to create your first emulator.
   the toolbar's keyboard button) sends your Mac keyboard to the device. With capture off, an
   emulator shows its own full on-screen keyboard, so you can see fields hidden under it; turning
   capture on, selecting another device and quitting put the emulator's setting back (phones are
-  not touched; see [docs/soft-keyboard.md](soft-keyboard.md)).
+  not touched; see [docs/soft-keyboard.md](soft-keyboard.md)). Settings ▸ Keyboard adds two
+  switches, as in Xcode's Device Hub: **Capture keyboard shortcuts** sends ⌘ shortcuts to a
+  simulator (or an iPhone with fast input) while capture is on — an app's own shortcuts
+  (⌘A, ⌘C, ⌘F, …) reach it — keeping ⌘Q, ⌘W, ⌘M, ⌘, and ⌘` for the Mac and ⌘K to turn capture off;
+  **Secure keyboard entry** keeps other apps on the Mac from reading the keys while they go to
+  a device. For a booted iOS simulator, Device ▸ Keyboard ▸ **Simulate Hardware Keyboard**
+  connects or disconnects its hardware keyboard (connected, iOS hides its software keyboard);
+  Settings ▸ Keyboard ▸ Simulate hardware keyboard by
+  default (on) connects it when a simulator is first shown live in a boot.
 - **Stuck emulator screen.** When an emulator is running but never sends a frame, the stage says
   "The emulator isn't sending its screen" with Restart Emulator and Retry buttons.
 - **Biometrics.** A simulator's Face ID / Touch ID match or non-match (⌥⇧⌘M / ⌥⇧⌘N) waits for
@@ -332,7 +365,9 @@ When the tools are installed, the app offers to create your first emulator.
   same key for the same job on both kinds: Lock (simulator) and Power (emulator) ⌘L, Siri and
   Assistant ⌥⇧⌘H, Simulate Memory Warning and Simulate Low Memory ⇧⌘M, Authorized with Face ID
   and Fingerprint Touch ⌥⇧⌘M. An emulator adds Back ⌘[, Recents ⌘], Previous App ⌥⌘[ and
-  Split Screen ⌥⌘S; a simulator adds Unauthorized with Face ID ⌥⇧⌘N and Slow Animations ⌥⌘T. ⌘←, ⌘→, ⌘↑, ⌘↓, ⌘[ and ⌘]
+  Split Screen ⌥⌘S; a simulator adds Unauthorized with Face ID ⌥⇧⌘N, Slow Animations ⌥⌘T and, as in
+  Device Hub, App Switcher ⌃⇧⌘H (Home pressed twice) and Action Button (on a simulator whose
+  frame has one). ⌘←, ⌘→, ⌘↑, ⌘↓, ⌘[ and ⌘]
   act on the device only when no text field has the focus; in a text field they keep their
   editing meaning.
 - **View menu and sidebar.** View ▸ Zoom In / Zoom Out / Zoom to Fit are ⌘+ / ⌘− / ⌘0, Hide

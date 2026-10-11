@@ -33,7 +33,7 @@ import Synchronization
 /// (`SimulatorKeyboard`); a character the layout has no key for is put on the
 /// simulator pasteboard with `simctl pbcopy` and followed by ⌘V. That path is
 /// experimental: on iOS 27.0 the ⌘V did not insert the `pbcopy` text in any
-/// field tried (see the spec, §3.4). Hardware buttons (the frame's side
+/// field tried (see the spec). Hardware buttons (the frame's side
 /// buttons, Home and Lock) go through the same channel, in order with the
 /// touches and keys; a button still down when the session stops goes up
 /// before its channel closes. The dtuhidd connection opens lazily, on the
@@ -53,6 +53,9 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
     public let udid: String
     /// The device set holding the simulator, or nil for the default set.
     public let deviceSet: URL?
+    /// The panel mirrored and touched (a foldable's inner panel, else the
+    /// main screen).
+    public let panel: SimulatorSessionPanel
     public let frames = FrameStore()
     public var transport: MirrorTransport { .simulatorSurface }
 
@@ -129,6 +132,8 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
     private enum InputEvent {
         case contacts([SimulatorContact])
         case keyboard(KeyboardCommand)
+        /// One key press with its modifiers (a ⌘ shortcut).
+        case stroke(SimulatorKeyStroke)
         /// One edge of a hardware button (the frame's side buttons).
         case button(SimulatorHardwareButton, isDown: Bool)
         /// A button pressed and released after `hold` (Home, Lock).
@@ -162,8 +167,17 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
     ///   - simctl: a client for the same device set, used to put text the
     ///     keyboard layout cannot type on the pasteboard. Without it such text
     ///     is dropped with an error.
-    public convenience init(udid: String, deviceSet: URL? = nil, bridge: any SimulatorBridging, simctl: SimctlClient? = nil) {
-        self.init(udid: udid, deviceSet: deviceSet, bridge: bridge, simctl: simctl, minimumPublishInterval: Self.defaultMinimumPublishInterval)
+    public convenience init(
+        udid: String,
+        deviceSet: URL? = nil,
+        bridge: any SimulatorBridging,
+        simctl: SimctlClient? = nil,
+        panel: SimulatorSessionPanel = .main
+    ) {
+        self.init(
+            udid: udid, deviceSet: deviceSet, bridge: bridge, simctl: simctl,
+            minimumPublishInterval: Self.defaultMinimumPublishInterval, panel: panel
+        )
     }
 
     /// Test seam: the publish interval, a fixed keyboard layout, and the
@@ -175,10 +189,12 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
         simctl: SimctlClient? = nil,
         minimumPublishInterval: Duration,
         keyboardLayout: SimulatorKeyboardLayout? = nil,
-        pasteboardWriter: (@Sendable (String) async throws -> Void)? = nil
+        pasteboardWriter: (@Sendable (String) async throws -> Void)? = nil,
+        panel: SimulatorSessionPanel = .main
     ) {
         self.udid = udid
         self.deviceSet = deviceSet
+        self.panel = panel
         self.bridge = bridge
         self.simctl = simctl
         self.address = SimulatorAddress(udid: udid, deviceSetPath: deviceSet?.path)
@@ -290,7 +306,7 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
     private func open(generation: UInt64) {
         do {
             _ = try bridge.load()
-            let screen = try bridge.makeScreen(for: address)
+            let screen = try bridge.makeScreen(for: address, screenID: panel.screenID)
             let initial = screen.initialProperties
             let adopted = state.withLock { state -> Bool in
                 guard state.running, state.generation == generation else { return false }
@@ -587,6 +603,15 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
         enqueue { _ in .keyboard(command) }
     }
 
+    /// A ⌘ shortcut reaches the simulator as the same key pressed with its
+    /// modifiers on the HID keyboard, in order with the keys already queued.
+    public var acceptsShortcuts: Bool { true }
+
+    public func send(shortcut: KeyShortcut) {
+        guard let stroke = shortcut.simulatorStroke else { return }
+        enqueue { _ in .stroke(stroke) }
+    }
+
     // MARK: - Hardware buttons
 
     /// The frame's side buttons reach the simulator as dtuhidd buttons, on
@@ -697,6 +722,10 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
                     }
                 case .keyboard(let command):
                     try type(command, input: input, generation: generation)
+                case .stroke(let stroke):
+                    for event in stroke.events {
+                        try input.send(event)
+                    }
                 case .button(let button, isDown: true):
                     try input.send(.button(button, isDown: true))
                     if !noteHeld(button, generation: generation) {
@@ -761,6 +790,7 @@ public final class SimulatorMirrorSession: MirrorSessionProtocol, SimulatorButto
         // Nothing connects until the first send, so a channel made for a
         // generation that ended meanwhile is simply dropped.
         let made = bridge.makeInput(for: address)
+        made.setDigitizerTarget(panel.digitizerTarget)
         return state.withLock { state in
             guard state.running, state.generation == generation else { return nil }
             if let existing = state.input { return existing }

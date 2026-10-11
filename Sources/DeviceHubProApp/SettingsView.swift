@@ -59,6 +59,30 @@ struct SettingsView: View {
                 ))
             }
 
+            Section("Keyboard") {
+                Toggle("Capture keyboard shortcuts", isOn: Binding(
+                    get: { model.preferences.captureKeyboardShortcuts },
+                    set: { model.preferences.setCaptureKeyboardShortcuts($0) }
+                ))
+                Text("With Keyboard Capture on, most keyboard shortcuts are sent to the simulator (an iPhone with fast input too) instead of Device Hub Pro. ⌘Q, ⌘W, ⌘M, ⌘, and ⌘` stay the Mac's, and ⌘K turns Keyboard Capture off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Secure keyboard entry", isOn: Binding(
+                    get: { model.preferences.secureKeyboardEntry },
+                    set: { model.preferences.setSecureKeyboardEntry($0) }
+                ))
+                Text("While Keyboard Capture sends your keys to a device, other apps on this Mac cannot read them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Simulate hardware keyboard by default", isOn: Binding(
+                    get: { model.preferences.simulateHardwareKeyboardByDefault },
+                    set: { model.preferences.setSimulateHardwareKeyboardByDefault($0) }
+                ))
+                Text("A simulator shown live starts with a hardware keyboard connected, so iOS hides its software keyboard. Device ▸ Keyboard ▸ Simulate Hardware Keyboard changes it for one simulator.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Screenshots") {
                 Toggle("Include device frame", isOn: Binding(
                     get: { model.preferences.includeDeviceFrameInScreenshots },

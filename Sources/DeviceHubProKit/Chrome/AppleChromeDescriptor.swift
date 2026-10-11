@@ -7,7 +7,7 @@ import Foundation
 /// The file is Apple's and stays on the user's Mac: it is read at runtime
 /// from `/Library/Developer/DeviceKit/Chrome/<name>.devicechrome/Contents/
 /// Resources/chrome.json` (`AppleDeviceKit`), never copied into the
-/// repository or the app (§3.5). Only the keys below are read;
+/// repository or the app. Only the keys below are read;
 /// the rest (`resizeRects`, the window `padding`, a TV's `stand`) are not
 /// used.
 public struct AppleChromeDescriptor: Sendable, Hashable {
@@ -134,9 +134,10 @@ public struct AppleChromeDescriptor: Sendable, Hashable {
     /// `com.apple.dt.devicekit.chrome.phone11`.
     public var identifier: String
     public var slices: Slices
-    /// The preview of the whole frame at one screen size; never drawn (one
-    /// chrome serves several screen sizes, so the frame is built from the
-    /// slices around the screen).
+    /// The preview of the whole frame at one screen size. One chrome serves
+    /// several screen sizes, so the frame is built from the slices around the
+    /// screen; the composite is drawn only when the slices are placeholders
+    /// (`AppleChromeLayout`).
     public var composite: String?
     /// `images.sizing`: from the screen's edge to the slices' outer box.
     public var sizing: Insets

@@ -216,6 +216,8 @@ public enum SimulatorHIDEvent: Sendable, Equatable {
     case button(SimulatorHardwareButton, isDown: Bool)
     /// A USB HID keyboard usage (page 7): a key position, not a character.
     case key(usage: UInt32, isDown: Bool)
+    /// A vendor-defined event, posted on dtuhidd's AVP custom service.
+    case vendorDefined(usagePage: UInt32, usage: UInt32, version: UInt32, data: Data)
 }
 
 /// How the input connection came up.
@@ -277,11 +279,25 @@ public struct SimulatorBridgeError: Error, Sendable, Equatable, CustomStringConv
 
 /// Loads the private simulator bridge and hands out per-simulator screens and
 /// input channels. See the file comment for the threading rule.
+extension SimulatorBridging {
+    /// A bridge without the switch (a test double, say).
+    public func setHardwareKeyboard(connected: Bool, for address: SimulatorAddress) throws {
+        throw SimulatorBridgeError(.apiUnavailable, "this bridge has no hardware keyboard switch")
+    }
+
+    /// The main screen (the lowest screen ID).
+    public func makeScreen(for address: SimulatorAddress) throws -> any SimulatorScreenBridging {
+        try makeScreen(for: address, screenID: 0)
+    }
+}
+
 public protocol SimulatorBridging: Sendable {
     /// Loads CoreSimulator (idempotent). Check `BridgeCompatibility` first.
     func load() throws -> SimulatorBridgeLoadInfo
-    /// Resolves the simulator's main screen. It must be booted.
-    func makeScreen(for address: SimulatorAddress) throws -> any SimulatorScreenBridging
+    /// Resolves one of the simulator's panels: the one whose screen ID is
+    /// `screenID`, or with 0 the lowest ID (the main screen; iPhone Duo's
+    /// outer panel). It must be booted.
+    func makeScreen(for address: SimulatorAddress, screenID: UInt32) throws -> any SimulatorScreenBridging
     /// An input channel for the simulator. Nothing connects until the first
     /// send or `connect()`: connecting marks dtuhidd active for the rest of
     /// the boot, which cuts legacy-Indigo clients off.
@@ -289,6 +305,10 @@ public protocol SimulatorBridging: Sendable {
     /// The simulator's GSEvent port (rotation, lock). Connectionless: each
     /// send looks the port up, so making one does nothing.
     func makeGSEvents(for address: SimulatorAddress) -> any SimulatorGSEventBridging
+    /// Connects or disconnects the booted simulator's hardware keyboard
+    /// (Simulate Hardware Keyboard): connected, iOS hides its software
+    /// keyboard. There is no reading it back.
+    func setHardwareKeyboard(connected: Bool, for address: SimulatorAddress) throws
 }
 
 extension SimulatorBridging {
@@ -334,6 +354,10 @@ public protocol SimulatorScreenBridging: AnyObject, Sendable {
 public protocol SimulatorInputBridging: AnyObject, Sendable {
     /// Never waits, not even for a connect in progress; safe on any queue.
     var isConnected: Bool { get }
+    /// The panel digitizer events go to: 0, the main screen, unless set
+    /// (iPhone Duo's inner panel). Safe on any queue.
+    var digitizerTarget: UInt32 { get }
+    func setDigitizerTarget(_ target: UInt32)
     /// Never waits; safe on any queue.
     var lastConnectReport: SimulatorHIDConnectReport? { get }
     /// Connects now if needed (sends connect on their own).
@@ -380,6 +404,8 @@ public final class FakeSimulatorBridge: SimulatorBridging {
         public var connectReport = SimulatorHIDConnectReport(attempts: 1, barrierMilliseconds: 5, totalMilliseconds: 205)
         /// Thrown by every GSEvent send.
         public var gsEventError: SimulatorBridgeError?
+        /// How long each input send takes (a busy guest).
+        public var sendDelay: TimeInterval = 0
 
         public init() {}
     }
@@ -429,11 +455,13 @@ public final class FakeSimulatorBridge: SimulatorBridging {
         return configuration.loadInfo
     }
 
-    public func makeScreen(for address: SimulatorAddress) throws -> any SimulatorScreenBridging {
+    public func makeScreen(for address: SimulatorAddress, screenID: UInt32) throws -> any SimulatorScreenBridging {
         noteCall()
         let configuration = self.configuration
         if let error = configuration.screenError { throw error }
-        let screen = FakeSimulatorScreen(address: address, properties: configuration.properties, surface: configuration.surface)
+        let screen = FakeSimulatorScreen(
+            address: address, screenID: screenID, properties: configuration.properties, surface: configuration.surface
+        )
         state.withLock { $0.screens.append(screen) }
         return screen
     }
@@ -445,7 +473,8 @@ public final class FakeSimulatorBridge: SimulatorBridging {
             address: address,
             failingConnects: configuration.failingConnects,
             connectError: configuration.connectError,
-            report: configuration.connectReport
+            report: configuration.connectReport,
+            sendDelay: configuration.sendDelay
         )
         state.withLock { $0.inputs.append(input) }
         return input
@@ -484,8 +513,12 @@ public final class FakeSimulatorScreen: SimulatorScreenBridging {
 
     private let state: Mutex<State>
 
-    init(address: SimulatorAddress, properties: SimulatorScreenProperties, surface: SimulatorSurface?) {
+    /// The screen ID it was asked for (0: the lowest).
+    public let requestedScreenID: UInt32
+
+    init(address: SimulatorAddress, screenID: UInt32 = 0, properties: SimulatorScreenProperties, surface: SimulatorSurface?) {
         self.address = address
+        self.requestedScreenID = screenID
         self.initialProperties = properties
         state = Mutex(State(surface: surface, properties: properties))
     }
@@ -592,21 +625,32 @@ public final class FakeSimulatorInput: SimulatorInputBridging {
         var flushes: [Flush] = []
         var report: SimulatorHIDConnectReport?
         var mainThreadCalls = 0
+        var digitizerTarget: UInt32 = 0
     }
 
     private let state: Mutex<State>
     private let connectError: SimulatorBridgeError
     private let report: SimulatorHIDConnectReport
+    private let sendDelay: TimeInterval
 
-    init(address: SimulatorAddress, failingConnects: Int, connectError: SimulatorBridgeError, report: SimulatorHIDConnectReport) {
+    init(
+        address: SimulatorAddress,
+        failingConnects: Int,
+        connectError: SimulatorBridgeError,
+        report: SimulatorHIDConnectReport,
+        sendDelay: TimeInterval = 0
+    ) {
         self.address = address
         self.connectError = connectError
         self.report = report
+        self.sendDelay = sendDelay
         state = Mutex(State(remainingFailures: failingConnects))
     }
 
     public var isConnected: Bool { state.withLock { $0.connected } }
     public var lastConnectReport: SimulatorHIDConnectReport? { state.withLock { $0.report } }
+    public var digitizerTarget: UInt32 { state.withLock { $0.digitizerTarget } }
+    public func setDigitizerTarget(_ target: UInt32) { state.withLock { $0.digitizerTarget = target } }
     /// Every connect attempt, lazy ones included.
     public var connectAttempts: Int { state.withLock { $0.connectAttempts } }
     /// The events delivered, in order.
@@ -631,11 +675,12 @@ public final class FakeSimulatorInput: SimulatorInputBridging {
         switch event {
         case .touch(let x, let y, _), .edgeTouch(let x, let y, _, _): points = [SimulatorTouchPoint(x: x, y: y)]
         case .twoFingerTouch(let first, let second, _): points = [first, second]
-        case .button, .key: points = []
+        case .button, .key, .vendorDefined: points = []
         }
         for point in points where !(0...1).contains(point.x) || !(0...1).contains(point.y) {
             throw SimulatorBridgeError(.invalidArgument, "fake: touch (\(point.x), \(point.y)) is out of range")
         }
+        if sendDelay > 0 { Thread.sleep(forTimeInterval: sendDelay) }
         try state.withLock { state in
             _ = try Self.connect(&state, error: connectError, report: report)
             state.sent.append(event)

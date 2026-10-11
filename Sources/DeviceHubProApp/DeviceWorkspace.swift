@@ -95,6 +95,8 @@ final class DeviceWorkspace {
     let appleControls: AppleControlsController
     /// A simulator's live stage.
     let simulatorCanvas: SimulatorCanvasController
+    /// A foldable simulator's fold strip (iPhone Duo).
+    let simulatorFold: SimulatorFoldController
     /// A selected physical iPhone's view-only screen: the live USB capture,
     /// the screenshot preview or the static panel.
     let physicalLive: PhysicalLiveViewController
@@ -193,6 +195,7 @@ final class DeviceWorkspace {
         self.physicalCrashLogs = physicalCrashLogs
         self.appleControls = appleControls
         self.simulatorCanvas = simulatorCanvas
+        self.simulatorFold = SimulatorFoldController(simulators: services.simulators, canvas: simulatorCanvas)
         self.physicalLive = PhysicalLiveViewController(provider: services.environment.screenCapture)
         // Two-phase init: the coordinator's real hooks close over `self`, so
         // it is built here with an inert placeholder and rebound once every
@@ -200,6 +203,18 @@ final class DeviceWorkspace {
         self.lifecycle = DeviceLifecycleCoordinator(hooks: DeviceWorkspace.placeholderLifecycleHooks)
         wireMirror()
         wireSimulatorCanvasSession()
+        simulatorFold.mirroredDevice = { [weak self] in self?.context.device }
+        // A foldable simulator is held through the fold's orientation picker:
+        // the stage's rotate and Device ▸ Orientation alike.
+        simulatorCanvas.holdFoldable = { [weak simulatorFold] udid, pose in
+            simulatorFold?.setHeldPose(pose, udid: udid) ?? false
+        }
+        appleControls.holdFoldable = { [weak simulatorFold] udid, pose in
+            simulatorFold?.setHeldPose(pose, udid: udid) ?? false
+        }
+        simulatorFold.onPoseChanged = { [weak appleControls] udid, pose in
+            appleControls?.noteHeldPose(pose, udid: udid)
+        }
         wirePhysicalLive()
         wirePhysicalControl()
         wireLifecycle()
@@ -638,6 +653,9 @@ final class DeviceWorkspace {
     /// sessions through the session hubs, and the mirror hands it a stopped
     /// session and asks the simulators for the simulator's display.
     private func wireSimulatorCanvasSession() {
+        simulatorCanvas.onLiveCanvasStarted = { [weak keyboard = services.simulatorHardwareKeyboard] udid in
+            keyboard?.liveCanvasStarted(udid: udid)
+        }
         simulatorCanvas.beginSession = { [weak self] session, device, capabilities in
             self?.beginMirrorSession(session, device: device, port: nil, capabilities: capabilities)
         }
@@ -830,8 +848,8 @@ final class DeviceWorkspace {
     // MARK: - Attach
 
     /// Attaches the right mirror transport for `device`: the emulator gRPC
-    /// path for emulators, the scrcpy/H.264 physical path otherwise (spec
-    /// §11.1). `DHP_FORCE_PHYSICAL=<serial>` (or `=1`) routes an emulator
+    /// path for emulators, the scrcpy/H.264 physical path otherwise.
+    /// `DHP_FORCE_PHYSICAL=<serial>` (or `=1`) routes an emulator
     /// through the physical transport for live verification.
     ///
     /// The emulator path awaits the port resolution (adb console reads, `ps`,
@@ -915,7 +933,7 @@ final class DeviceWorkspace {
         )
     }
 
-    /// The auto-resume hook (spec §5.2): re-validates the resume intent
+    /// The auto-resume hook: re-validates the resume intent
     /// before `mirror`, then reports a failed attempt back to the lifecycle.
     func lifecycleResume(serial: String) async {
         let generation = context.sessionGeneration
@@ -925,7 +943,7 @@ final class DeviceWorkspace {
         let isArmed = lifecycleIfRunning?.isAutoReconnectArmed(serial: serial) ?? false
         let errorBeforeResume = status.errorMessage
         let selection: String? = if case .device(let selected) = deviceSelection { selected } else { nil }
-        // Pre-mirror re-check (spec §5.2, "intent invalid … → no action"):
+        // Pre-mirror re-check ("intent invalid … → no action"):
         // the resume task can run after the user moved on or a newer session
         // landed, and `mirror` would `select` + `beginMirrorSession` over the
         // user's fresh session — bail before it does.
@@ -1176,7 +1194,7 @@ final class DeviceWorkspace {
     /// the mirror, and hands a running recording to the save panel. The
     /// app's own teardowns (the lifecycle's, a fatal stream, a device switch,
     /// quit) use `tearDownMirror(cause:)`.
-    /// The waiting panel's "Reconnect" (spec §5.2): this workspace's own
+    /// The waiting panel's "Reconnect": this workspace's own
     /// coordinator resumes at once. Being user initiated it clears the auto
     /// marker, so a failure during this attempt still reaches the alert
     /// surface. Nil unless the watcher is running, like every other
@@ -1387,11 +1405,19 @@ extension DeviceWorkspace {
     /// the stream's size and the panel's density are known (an AVD's `xDpi`
     /// comes from `dumpsys display`, a simulator's `hdpi` from its device
     /// type).
+    /// The displays the stage zoom's scale modes read: a foldable
+    /// simulator in its 3D model always its outer panel's, which the model
+    /// is sized by in every posture (`MirrorStageContent.frontModel`).
+    private var zoomDisplayShapes: [DisplayShape] {
+        if simulatorFold.deviceModel != nil, let outer = simulatorFold.outerDisplayShape { return [outer] }
+        return mirror.liveDisplayShapes
+    }
+
     func physicalPointsPerPixel() -> Double? {
         guard let pixels = mirror.mirrorViewState.devicePixelSize, pixels.width > 0, pixels.height > 0 else {
             return nil
         }
-        let shape = DisplayShape.matching(frame: pixels, in: mirror.liveDisplayShapes)
+        let shape = DisplayShape.matching(frame: pixels, in: zoomDisplayShapes)
         guard let dpi = ZoomMath.devicePixelsPerInch(
             xDpi: shape?.xDpi,
             densityDpi: shape?.densityDpi,
@@ -1414,7 +1440,7 @@ extension DeviceWorkspace {
         guard let pixels = mirror.mirrorViewState.devicePixelSize, pixels.width > 0, pixels.height > 0 else {
             return nil
         }
-        let shape = DisplayShape.matching(frame: pixels, in: mirror.liveDisplayShapes)
+        let shape = DisplayShape.matching(frame: pixels, in: zoomDisplayShapes)
         let density = shape?.densityDpi ?? mirror.mirrorViewState.displayDensityDpi
         return ZoomMath.pointAccuratePointsPerPixel(
             densityDpi: density.map(Double.init),
@@ -1430,7 +1456,7 @@ extension DeviceWorkspace {
         guard let pixels = mirror.mirrorViewState.devicePixelSize, pixels.width > 0, pixels.height > 0 else {
             return nil
         }
-        let shape = DisplayShape.matching(frame: pixels, in: mirror.liveDisplayShapes)
+        let shape = DisplayShape.matching(frame: pixels, in: zoomDisplayShapes)
         return ZoomMath.pixelAccuratePointsPerPixel(
             backingScaleFactor: Self.backingScaleFactor(),
             panelLongSide: shape.map { Double(max($0.width, $0.height)) },

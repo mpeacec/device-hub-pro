@@ -28,7 +28,8 @@ people and coding agents alike.
   platform the row is offered on) and adds or updates the verifier row each key maps:
   `android/verifier` for `android` (build/run: `android/verifier/README.md`), `ios/verifier`
   for `ios` (build/run: `ios/verifier/README.md`; a verifier row whose Controls row is not
-  mapped yet is listed in its `Registry.awaitingControlsRow`). The Swift
+  mapped yet is listed in its `Registry.awaitingControlsRow`; the rows of its Device & hardware
+  section check features outside the Controls panel and are mapped by none). The Swift
   (`ControlsRowManifestTests`), JUnit (`ControlsRowsManifestTest`) and iOS registry
   (`IOSVerifierRegistryTests`) suites all check that manifest.
 - Controls and features that cannot work on the selected device are not shown (no disabled
@@ -236,6 +237,31 @@ alternative stays the fallback.
   `Sources/DeviceHubProKit/Apple/FastInput/` (`FastInputSourceGuardTests`).
 - **Simulator bridge** (`DHP_DISABLE_SIMBRIDGE`, `DHP_SIMBRIDGE_ALLOW_UNTESTED`):
   `Sources/DeviceHubProSimBridge`, provenance in its `PROVENANCE.md`.
+- **Simulator fold** (`DHP_DISABLE_SIMULATOR_FOLD`): a foldable simulator's hinge (iPhone Duo)
+  goes over the bridge's input connection as a vendor-defined dtuhidd event (`SimulatorFold`,
+  `SimulatorFoldSender`; entries in the bridge's `PROVENANCE.md`). Its canary is
+  `DeviceHubProSimBridgeSmoke --udid <UDID> --avp '{"source":"hinge-slider-control","type":"range","value":180}'
+  --avp-format iokit --avp-page FF61 --avp-usage 5B`, which reports how lit each panel is. The device
+  is held (Laptop, Tent, the stage's rotate, Device ▸ Orientation) through the same service's
+  orientation picker (`SimulatorFold.poseEvent`), whose canary is the same command with
+  `--avp '{"source":"orientation-picker-control","type":"enum","value":"landscape-left"}'`, and
+  `--orient` reports each panel's interface. Off, or without the live canvas, the pill's postures are
+  not offered.
+- **Device model** (`DHP_DISABLE_DEVICE_MODEL`): a foldable simulator's 3D view reads Apple's model
+  of the device (iPhone Duo's `V68.usdz`) from the user's Xcode at runtime (`AppleDeviceModel`):
+  never copied into the repository, the app or a fixture. A file whose SHA-256 is one of
+  `AppleDeviceModel.known` is used on its measured numbers; another build's file only when it loads
+  with the same shape (same product class and animation length, `AppleDeviceModel.fits`, and both
+  panels found), else the stage keeps the 2D chrome. Its parts are found by shape (`AppleDeviceModel.panels`), not by their
+  scrambled names, and the front view's look by their materials' own values (`AppleDeviceModel.FrontLook`:
+  the black round the panels drawn black, the rest in greys, lit by a sky built in code), never by
+  name. Device Hub's dark finish (the default of View ▸ Device Color) is selected by a USD layer written to the temporary folder
+  that references the file where it is (`AppleDeviceModel.colorVariantLayer`), and the pill's posture
+  glyphs are read from the same plug-in's asset catalog (`FoldPostureGlyphs`); neither is copied.
+  Its canary is `AppleDeviceModelLiveTests` (`DHP_DEVICE_MODEL_LIVE=1`, on a Mac
+  whose selected Xcode ships a known model, or with `DHP_DEVICE_MODEL_DEVELOPER_DIR` naming such an
+  Xcode's `Contents/Developer`). Off, or without a usable model, the stage keeps the 2D
+  chrome.
 
 ## Maestro flows
 

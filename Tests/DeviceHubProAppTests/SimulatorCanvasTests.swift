@@ -217,7 +217,7 @@ final class SimulatorCanvasTests: XCTestCase {
     }
 
     /// A live session reads `dtuhidd.active` as it starts, before any
-    /// input (§3.8): read 0, the canvas carries the first-input tooltip; read
+    /// input: read 0, the canvas carries the first-input tooltip; read
     /// 1 (Device Hub or another client connected in this boot), none. The
     /// view-only canvas takes no input and reads nothing. A shutdown forgets
     /// the reading (a boot starts at 0).
@@ -278,6 +278,47 @@ final class SimulatorCanvasTests: XCTestCase {
 
         session.putFrame()
         await waitUntil(timeout: 3, "T3") { model.simulators.tooling.tier == .t3 }
+    }
+
+    /// Simulate Hardware Keyboard: the first live canvas of a boot connects
+    /// the keyboard by default (once), the menu's switch connects and
+    /// disconnects it, a refused switch reads back as it was, and with the
+    /// default off nothing is sent.
+    func testTheLiveCanvasConnectsTheHardwareKeyboardByDefault() async throws {
+        let (model, _, _) = try await readyModel()
+        let keyboard = model.services.simulatorHardwareKeyboard
+        let sent = SentSwitches()
+        keyboard.send = { _, connected, _ in await sent.append(connected) }
+        XCTAssertTrue(model.preferences.simulateHardwareKeyboardByDefault, "on by default, as in Device Hub")
+        XCTAssertTrue(keyboard.offers(Self.udid))
+        XCTAssertFalse(keyboard.isConnected(Self.udid))
+
+        model.simulatorCanvas.attach(Self.udid)
+        await waitUntil(timeout: 3, "the default") { sent.values == [true] }
+        XCTAssertTrue(keyboard.isConnected(Self.udid))
+        keyboard.liveCanvasStarted(udid: Self.udid)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(sent.values, [true], "once per boot")
+
+        keyboard.setConnected(false, udid: Self.udid)
+        XCTAssertFalse(keyboard.isConnected(Self.udid))
+        await waitUntil(timeout: 3, "the switch") { sent.values == [true, false] }
+
+        keyboard.send = { _, _, _ in throw SimulatorBridgeError(.apiUnavailable, "refused") }
+        keyboard.setConnected(true, udid: Self.udid)
+        await waitUntil(timeout: 3, "the revert") { !keyboard.isConnected(Self.udid) }
+    }
+
+    func testWithTheDefaultOffTheKeyboardIsLeftAlone() async throws {
+        let (model, _, _) = try await readyModel()
+        let keyboard = model.services.simulatorHardwareKeyboard
+        let sent = SentSwitches()
+        keyboard.send = { _, connected, _ in await sent.append(connected) }
+        model.preferences.setSimulateHardwareKeyboardByDefault(false)
+        model.simulatorCanvas.attach(Self.udid)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(sent.values, [])
+        XCTAssertFalse(keyboard.isConnected(Self.udid))
     }
 
     /// A live session that shows nothing within the smoke check's bound is
@@ -529,7 +570,7 @@ final class SimulatorCanvasTests: XCTestCase {
         XCTAssertEqual(pose.presentedAngle, 0)
     }
 
-    /// devicectl-backed rotation is T2 (§3.7): in the default set the
+    /// devicectl-backed rotation is T2: in the default set the
     /// view-only canvas does not offer Rotate, and runs no devicectl, until
     /// The attach asks devicectl about the simulator the user booted and
     /// selected (`device info details`, T2); when it answers, the
@@ -726,6 +767,19 @@ final class SimulatorCanvasTests: XCTestCase {
         XCTAssertEqual(Canvas.orientation(for: .counterClockwise), .landscapeLeft)
         XCTAssertEqual(Canvas.orientation(for: .clockwise), .landscapeRight)
         XCTAssertEqual(Canvas.orientation(for: nil), .portrait)
+    }
+
+    /// A first frame turns the device to its interface's pose, unless the
+    /// device is a foldable: that one rests as its lit panel does, whatever
+    /// the interface says (a closed iPhone Duo publishes the open one's
+    /// landscape right).
+    func testAFoldableIgnoresItsFirstFramesTurn() {
+        typealias Canvas = SimulatorCanvasController
+        XCTAssertEqual(Canvas.firstFrameOrientation(published: .clockwise, foldResting: nil), .landscapeRight)
+        XCTAssertNil(Canvas.firstFrameOrientation(published: .upright, foldResting: nil))
+        XCTAssertNil(Canvas.firstFrameOrientation(published: nil, foldResting: nil))
+        XCTAssertEqual(Canvas.firstFrameOrientation(published: .clockwise, foldResting: .portrait), .portrait)
+        XCTAssertEqual(Canvas.firstFrameOrientation(published: nil, foldResting: .landscapeRight), .landscapeRight)
     }
 
     // MARK: - Menus and handoff
@@ -959,4 +1013,11 @@ final class SimulatorCanvasMemorySharingTests: XCTestCase {
         let model = AppModel.testing()
         XCTAssertTrue(model.simulatorCanvas.memory === model.simulatorCanvasMemory)
     }
+}
+
+/// The hardware keyboard switches a test saw sent, in order.
+@MainActor
+private final class SentSwitches: Sendable {
+    private(set) var values: [Bool] = []
+    func append(_ value: Bool) { values.append(value) }
 }

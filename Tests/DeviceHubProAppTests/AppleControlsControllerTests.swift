@@ -374,6 +374,42 @@ final class AppleControlsControllerTests: XCTestCase {
         XCTAssertTrue(devicectlCalls(devicectl).contains("device settings appearance --reduce-motion on"))
     }
 
+    /// A foldable simulator is held through the fold's orientation picker
+    /// (`holdFoldable`), as Device Hub holds iPhone Duo: Device ▸ Orientation
+    /// sends nothing to devicectl for it. Any other simulator turns through
+    /// devicectl as before.
+    func testAFoldableIsHeldThroughTheFoldNotDevicectl() async throws {
+        let simctl = try simctl()
+        let devicectl = try devicectl()
+        let (controller, inventory, _) = try await controller(simctl: simctl, devicectl: devicectl)
+        await controller.attach(Self.booted)
+        // The fold controller records a held simulator in the fold book.
+        inventory.noteFold(udid: Self.booted, pose: .portrait)
+        var held: [(String, SimulatorDevicePose)] = []
+        controller.holdFoldable = { udid, pose in
+            held.append((udid, pose))
+            return true
+        }
+        let before = devicectl.calls.count
+        await controller.setPose(.faceUp)
+        XCTAssertEqual(held.map(\.1), [.faceUp])
+        XCTAssertEqual(held.first?.0, Self.booted)
+        XCTAssertEqual(devicectl.calls.count, before, "devicectl is not asked")
+
+        inventory.noteFold(udid: Self.booted, pose: .faceUp)
+        controller.noteHeldPose(.faceUp, udid: Self.booted)
+        XCTAssertEqual(controller.state.pose, .faceUp, "the menu checks the held pose")
+        controller.noteHeldPose(.faceDown, udid: "another")
+        XCTAssertEqual(controller.state.pose, .faceUp, "another simulator's pose is not this one's")
+
+        await controller.attach(Self.booted)
+        XCTAssertEqual(controller.state.pose, .faceUp, "devicectl's read does not undo a held pose")
+
+        controller.holdFoldable = { _, _ in false }
+        await controller.setPose(.landscapeLeft)
+        XCTAssertTrue(devicectlCalls(devicectl).contains { $0.hasPrefix("device orientation set") }, "not a foldable: devicectl turns it")
+    }
+
     /// T1 (devicectl missing): the appearance falls back to simctl's three
     /// `ui` reads, one per tick, and the devicectl rows are hidden.
     func testWithoutDevicectl() async throws {
@@ -451,6 +487,22 @@ final class AppleControlsControllerTests: XCTestCase {
         await controller.setCleanStatusBar(false)
         XCTAssertEqual(simctl.calls.last, "status_bar \(Self.booted) clear")
         XCTAssertEqual(controller.statusBarActive, false)
+    }
+
+    /// Device ▸ Battery, as Device Hub's: only the status bar's battery is
+    /// overridden, at the level, discharging (the time and the rest stay);
+    /// the menu checks 100 without an override and the level once set.
+    func testBatteryMenuSetsTheStatusBarBattery() async throws {
+        let simctl = try simctl()
+        let (controller, _, _) = try await controller(simctl: simctl, devicectl: nil)
+        await controller.attach(Self.booted)
+        XCTAssertEqual(controller.batteryMenuLevel, 100)
+        await controller.setBatteryLevel(75)
+        XCTAssertTrue(simctl.calls.contains("status_bar \(Self.booted) override --batteryState discharging --batteryLevel 75"),
+                      "\(simctl.calls.suffix(3))")
+        XCTAssertEqual(controller.statusBarActive, true)
+        XCTAssertEqual(controller.batteryMenuLevel, 75)
+        XCTAssertEqual(AppleControlsController.batteryMenuLevels, [100, 75, 50, 25])
     }
 
     /// A write that ends after the user selected another simulator changes

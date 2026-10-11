@@ -115,6 +115,8 @@ struct AppleSettingsMenuPlan {
 
     var showsAccessibility: Bool { !accessibilityGroups.isEmpty }
     var showsAppearance: Bool { shows(.appearance) }
+    /// Battery sets the status bar's battery, as in Device Hub.
+    var showsBattery: Bool { shows(.statusBar) }
     var showsLocation: Bool { shows(.location) }
     var showsSound: Bool { shows(.volume) }
     /// Orientation is also hidden while the simulator is off (as Device Hub does).
@@ -284,7 +286,8 @@ struct DeviceMenuItems: View {
         let androidBlock = layout.showsAndroidExtras && workspace?.menuTargetSerial != nil
         let profile = layout.kind == .android || layout.kind == .simulator
         let sendFiles = layout.isRunning && (layout.kind == .simulator || layout.kind == .android) && workspace != nil
-        let showsFold = workspace?.hardware.showsFoldControls == true && workspace?.menuTargetSerial != nil
+        let showsFold = (workspace?.hardware.showsFoldControls == true && workspace?.menuTargetSerial != nil)
+            || (workspace?.simulatorFold.showsFoldControls == true && workspace?.contextIsSelection == true)
         let stage = showsFold || workspace?.offersResizeMode == true
         if lifecycle { lifecycleItems(layout) }
         if appleBlock, let udid = selectedSimulator?.udid, let workspace {
@@ -327,7 +330,8 @@ struct DeviceMenuItems: View {
         if lifecycle || appleBlock || appleExtras || androidSettings || androidBlock || profile || sendFiles || stage { Divider() }
         KeyboardMenu(
             model: model, workspace: workspace, avdName: layout.avdName, isRunning: layout.isRunning,
-            capturesWhenStopped: false
+            capturesWhenStopped: false,
+            simulatorUDID: layout.kind == .simulator && layout.isRunning ? selectedSimulator?.udid : nil
         )
         if layout.kind == .android {
             Button("Stop Mirror") { workspace?.stopMirror() }
@@ -429,6 +433,10 @@ struct DeviceMenuItems: View {
             Button("Fold / Unfold") {
                 Task { @MainActor in workspace?.hardware.toggleFold() }
             }
+        } else if workspace?.simulatorFold.showsFoldControls == true, workspace?.contextIsSelection == true {
+            Button("Fold / Unfold") {
+                workspace?.simulatorFold.toggleFold()
+            }
         }
         // Device Hub's Device > Enter Resize Mode (no shortcut there either):
         // only a device whose display can be resized lists it; a stopped one
@@ -456,6 +464,9 @@ struct KeyboardMenu: View {
     /// the device is off, so the menu item is too (the physical menu, which
     /// has no such state, leaves it on).
     var capturesWhenStopped = true
+    /// The selected simulator, for Simulate Hardware Keyboard (shown only
+    /// for a booted iOS simulator with the bridge).
+    var simulatorUDID: String?
 
     private var needsEnabling: Bool {
         guard let avdName else { return false }
@@ -470,6 +481,12 @@ struct KeyboardMenu: View {
             ))
             .keyboardShortcut("k", modifiers: .command)
             .disabled(!capturesWhenStopped && !isRunning)
+            if let simulatorUDID, let keyboard = model?.services.simulatorHardwareKeyboard, keyboard.offers(simulatorUDID) {
+                Toggle("Simulate Hardware Keyboard", isOn: Binding(
+                    get: { keyboard.isConnected(simulatorUDID) },
+                    set: { keyboard.setConnected($0, udid: simulatorUDID) }
+                ))
+            }
             if let avdName, needsEnabling {
                 Divider()
                 // The change needs the AVD stopped and makes its next start a
@@ -534,6 +551,17 @@ private struct AppleDeviceSettingsMenus: View {
             }
         }
 
+
+        if plan.showsBattery {
+            IconMenu("Battery", "battery.75percent", disabled: !isRunning) {
+                ForEach(AppleControlsController.batteryMenuLevels, id: \.self) { level in
+                    Toggle("\(level)%", isOn: Binding(
+                        get: { controls.udid == udid && controls.batteryMenuLevel == level },
+                        set: { if $0 { act { await $0.setBatteryLevel(level) } } }
+                    ))
+                }
+            }
+        }
 
         if let title = plan.biometricMenuTitle {
             biometricMenu(title, symbol: Self.biometricSymbol(title))
@@ -1061,6 +1089,14 @@ struct ControlsMenuItems: View {
             Button("Siri") { workspace?.simulatorCanvas.siri() }
                 .keyboardShortcut("h", modifiers: [.command, .shift, .option])
                 .disabled(!simulatorMenu.canPressHome)
+            Button("App Switcher") { workspace?.simulatorCanvas.appSwitcher() }
+                .keyboardShortcut("h", modifiers: [.command, .shift, .control])
+                .disabled(!simulatorMenu.canPressHome)
+            // Only for a simulator whose chrome has an Action button.
+            if let selectedSimulator, workspace?.simulatorCanvas.actionButton(of: selectedSimulator) != nil {
+                Button("Action Button") { workspace?.simulatorCanvas.pressActionButton() }
+                    .disabled(!simulatorMenu.canPressHome)
+            }
             // Simulator.app's Device ▸ Shake (⌃⌘Z): a shake gesture is an
             // iPhone's and an iPad's, not a TV's, a watch's or a headset's
             // (not shown where it cannot work).

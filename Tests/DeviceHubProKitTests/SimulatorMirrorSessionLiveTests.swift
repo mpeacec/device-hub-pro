@@ -43,7 +43,7 @@ import XCTest
 /// With `DHP_IOS_CAPTURE_DIR` set, the orientation rows are also written
 /// there as `orientation-uiOrientation.txt`, the fixture's source.
 final class SimulatorMirrorSessionLiveTests: XCTestCase {
-    /// Per channel, 0–255. See the spec (§3.4) for the values measured: the
+    /// Per channel, 0–255. See the spec for the values measured: the
     /// matching picture and, as a control, the same frame compared half
     /// turned (printed with each row).
     static let maximumDifference = 3.0
@@ -83,7 +83,7 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
     }
 
     /// The canary's own rules, without a simulator: each probe is typed
-    /// with keys only (a paste would not arrive, see the spec, §3.4).
+    /// with keys only (a paste would not arrive, see the spec).
     func testTheKeyboardCanaryTypesEveryProbeWithKeys() {
         XCTAssertEqual(Self.layout(forLocale: "tr_TR"), .turkishQ)
         XCTAssertEqual(Self.layout(forLocale: "en_US"), .usQWERTY)
@@ -141,8 +141,12 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
         let firstFrameSeconds = Date().timeIntervalSince(started)
         Self.report(String(format: "first frame %.0f ms", firstFrameSeconds * 1000))
         XCTAssertLessThan(firstFrameSeconds, 3, "the T3 bound")
-        XCTAssertEqual(session.frames.current?.width, 1206)
-        XCTAssertEqual(session.frames.current?.height, 2622)
+        // The main display (1206 × 2622 on an iPhone 17 Pro), or a
+        // foldable's outer panel, which a booted foldable shows closed.
+        let displays = try await LiveTestSimulators.displays(ofDeviceType: device.deviceTypeIdentifier, simctl: simctl)
+        let shown = try XCTUnwrap(displays.panels?.outer ?? displays.main)
+        XCTAssertEqual(session.frames.current?.width, shown.width)
+        XCTAssertEqual(session.frames.current?.height, shown.height)
         XCTAssertEqual(session.frames.current?.rotation, 0)
         XCTAssertEqual(session.transport, .simulatorSurface)
 
@@ -160,8 +164,18 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
         XCTAssertLessThanOrEqual(idleEnd.publishedFrames - idleStart.publishedFrames, idleCallbacks + 1, "no publish without a change")
         XCTAssertLessThan(idleCPU, 3, "idle CPU bound")
 
-        // Dragging Settings: frames flow at up to 60 per second.
-        _ = try await simctl.launch(udid: udid, bundleIdentifier: "com.apple.Preferences")
+        // Dragging Settings: frames flow at up to 60 per second. A slow boot
+        // (iPhone Duo in a VM: about 90 s to the home screen) refuses the
+        // launch until SpringBoard is up, so it is asked again.
+        let launchDeadline = ContinuousClock.now + .seconds(120)
+        while true {
+            do {
+                _ = try await simctl.launch(udid: udid, bundleIdentifier: "com.apple.Preferences")
+                break
+            } catch where ContinuousClock.now < launchDeadline {
+                try await Task.sleep(for: .seconds(5))
+            }
+        }
         try await Task.sleep(for: .seconds(2))
         await waitForIdle(session, quiet: 1.0, timeout: 20)
         let dragBefore = session.surfaceStatistics()
@@ -192,9 +206,21 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
         await waitForIdle(session, quiet: 1.0, timeout: 20)
         var captureRows = ["request\tgs_event\tui_orientation\tscreenshot\tpublished"]
         var previousRotation = SimulatorFrameRotation.upright
+        // A foldable is held through its orientation picker, as the app holds
+        // it (`SimulatorFoldController.setHeldPose`): the GSEvent leaves its
+        // interface as it was. Its screenshots name the outer panel it shows.
+        let foldSender = displays.panels.map { _ in SimulatorFoldSender(bridge: bridge) }
+        let rotate: (SimulatorOrientation) async throws -> Void = { orientation in
+            if let foldSender {
+                foldSender.send([.pose(SimulatorFold.pose(for: orientation))], to: address)
+                try await Task.sleep(for: .seconds(1.5))
+            } else {
+                let route = try await actions.rotate(to: orientation)
+                XCTAssertEqual(route, .gsEvent, "a private set has no devicectl")
+            }
+        }
         for orientation in [SimulatorOrientation.landscapeLeft, .landscapeRight, .portraitUpsideDown, .portrait] {
-            let route = try await actions.rotate(to: orientation)
-            XCTAssertEqual(route, .gsEvent, "a private set has no devicectl")
+            try await rotate(orientation)
             try await Task.sleep(for: .milliseconds(600))
             await waitForIdle(session, quiet: 1.0, timeout: 10)
             let properties = try await onBackground { try probe.currentProperties() }
@@ -202,7 +228,7 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
             XCTAssertEqual(session.publishedRotation, rotation, "\(orientation)")
             let frame = try XCTUnwrap(Pixels(session.frames.current))
             let shotURL = simulators.setDirectory.appendingPathComponent("shot-\(orientation.rawValue).png")
-            try await simctl.screenshot(udid: udid, to: shotURL, timeout: .seconds(20))
+            try await simctl.screenshot(udid: udid, to: shotURL, timeout: .seconds(20), display: displays.panels?.outer.screenID)
             let shot = try XCTUnwrap(Pixels(png: shotURL))
             XCTAssertEqual(frame.width, shot.width, "\(orientation)")
             XCTAssertEqual(frame.height, shot.height, "\(orientation)")
@@ -226,30 +252,46 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
         }
 
         // Landscape: a drag for turned-copy times, then a tap on the address
-        // bar changes the frame.
-        _ = try await actions.rotate(to: .landscapeLeft)
+        // bar changes the frame. Landscape is the shown display turned: as
+        // wide as it is tall upright (2622 on an iPhone 17 Pro).
+        let landscapeWidth = shown.height
+        let landscapeHeight = shown.width
+        try await rotate(.landscapeLeft)
         try await Task.sleep(for: .milliseconds(800))
         await waitForIdle(session, quiet: 1.0, timeout: 10)
         XCTAssertEqual(session.publishedRotation, .counterClockwise)
-        XCTAssertEqual(session.frames.current?.width, 2622)
+        XCTAssertEqual(session.frames.current?.width, landscapeWidth)
         for gesture in 0..<4 {
             let (from, to) = gesture.isMultiple(of: 2) ? (900.0, 400.0) : (400.0, 900.0)
-            await drag(session, x: 1311, fromY: from, toY: to, steps: 20)
+            await drag(session, x: Double(landscapeWidth) / 2, fromY: from, toY: to, steps: 20)
         }
         await waitForIdle(session, quiet: 1.0, timeout: 10)
-        let beforeTap = try XCTUnwrap(Pixels(session.frames.current))
-        let tapFrames = session.surfaceStatistics().publishedFrames
-        // The address field, centred in the landscape toolbar.
-        session.send(TouchCommand(phase: .down, x: 1311, y: 98, id: 9))
-        try await Task.sleep(for: .milliseconds(60))
-        session.send(TouchCommand(phase: .up, x: 1311, y: 98, id: 9))
-        let tapped = await waitUntil(2) { session.surfaceStatistics().publishedFrames > tapFrames }
-        XCTAssertTrue(tapped, "a frame after the landscape tap")
-        await waitForIdle(session, quiet: 1.0, timeout: 10)
-        let afterTap = try XCTUnwrap(Pixels(session.frames.current))
-        let tapChange = beforeTap.differingShare(afterTap)
-        Self.report(String(format: "landscape tap changed %.1f%% of the sampled pixels", tapChange * 100))
-        XCTAssertGreaterThan(tapChange, 0.02, "the landscape tap focused the address field")
+        if displays.panels == nil {
+            let beforeTap = try XCTUnwrap(Pixels(session.frames.current))
+            let tapFrames = session.surfaceStatistics().publishedFrames
+            // The address field, centred in the landscape toolbar.
+            session.send(TouchCommand(phase: .down, x: Int32(landscapeWidth / 2), y: 98, id: 9))
+            try await Task.sleep(for: .milliseconds(60))
+            session.send(TouchCommand(phase: .up, x: Int32(landscapeWidth / 2), y: 98, id: 9))
+            let tapped = await waitUntil(2) { session.surfaceStatistics().publishedFrames > tapFrames }
+            XCTAssertTrue(tapped, "a frame after the landscape tap")
+            await waitForIdle(session, quiet: 1.0, timeout: 10)
+            let afterTap = try XCTUnwrap(Pixels(session.frames.current))
+            let tapChange = beforeTap.differingShare(afterTap)
+            Self.report(String(format: "landscape tap changed %.1f%% of the sampled pixels", tapChange * 100))
+            XCTAssertGreaterThan(tapChange, 0.02, "the landscape tap focused the address field")
+        } else {
+            // iPhone Duo's Safari lays its landscape toolbar out otherwise:
+            // the field typed into is Search's, pulled down from the middle
+            // of the home screen, upright.
+            try await rotate(.portrait)
+            try await actions.home()
+            try await Task.sleep(for: .seconds(1.5))
+            await drag(session, x: Double(shown.width) / 2, fromY: Double(shown.height) * 0.35,
+                       toY: Double(shown.height) * 0.6, steps: 20)
+            try await Task.sleep(for: .seconds(1.5))
+            await waitForIdle(session, quiet: 1.0, timeout: 10)
+        }
 
         // Typing into the focused field, read back through the pasteboard.
         // The simulator inherits the Mac's locale, and its hardware keyboard
@@ -269,19 +311,15 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
             session.send(.text(typed))
             session.send(.text("😀"))
             try await Task.sleep(for: .seconds(2))
-            let input = try await onBackground { bridge.makeInput(for: address) }
-            try await onBackground {
-                for event in SimulatorKeyStroke(usage: 0x04, modifiers: [SimulatorKeyboard.leftCommand]).events
-                    + SimulatorKeyStroke(usage: 0x06, modifiers: [SimulatorKeyboard.leftCommand]).events {
-                    try input.send(event)
-                }
-                try input.flush(timeout: .seconds(2))
-            }
-            try await Task.sleep(for: .milliseconds(500))
+            // ⌘A and ⌘C as captured keyboard shortcuts (`send(shortcut:)`,
+            // the same key with Command held on the HID keyboard).
+            XCTAssertTrue(session.acceptsShortcuts)
+            session.send(shortcut: KeyShortcut(keyCode: 0))
+            session.send(shortcut: KeyShortcut(keyCode: 8))
+            try await Task.sleep(for: .seconds(1))
             let readBack = try await simctl.pasteboard(udid: udid)
             Self.report("typed \"\(typed)\" + paste \"😀\", field read back \"\(readBack)\"")
             XCTAssertTrue(readBack.hasPrefix(typed), "the HID-typed text arrived exactly: \(readBack)")
-            try await onBackground { input.disconnect() }
         } else {
             // No table for this layout: the session would type U.S. key
             // positions, so there is nothing exact to check.
@@ -291,7 +329,17 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
         // Home from the displayed bottom edge, in landscape.
         session.send(.specialKey(53))  // escape, to leave the field
         try await Task.sleep(for: .milliseconds(500))
-        await swipeUpFromBottom(session, width: 2622, height: 1206)
+        if displays.panels == nil {
+            await swipeUpFromBottom(session, width: landscapeWidth, height: landscapeHeight)
+        } else {
+            // On iPhone Duo the field was Search's, whose keyboard takes the
+            // bottom edge: Safari is swiped away instead, upright.
+            try await actions.home()
+            try await simctl.checked(["openurl", udid, "https://example.com"])
+            try await Task.sleep(for: .seconds(3))
+            await waitForIdle(session, quiet: 1.0, timeout: 10)
+            await swipeUpFromBottom(session, width: shown.width, height: shown.height)
+        }
         try await Task.sleep(for: .seconds(1.5))
         await waitForIdle(session, quiet: 1.0, timeout: 10)
         let afterSwipe = try XCTUnwrap(Pixels(session.frames.current))
@@ -301,7 +349,7 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
         XCTAssertLessThan(swipeHome, 0.15, "the edge swipe went Home")
 
         // Home button: from Safari back to the home screen.
-        _ = try await actions.rotate(to: .portrait)
+        try await rotate(.portrait)
         try await simctl.checked(["openurl", udid, "https://example.com"])
         try await Task.sleep(for: .seconds(3))
         await waitForIdle(session, quiet: 1.0, timeout: 10)
@@ -314,6 +362,32 @@ final class SimulatorMirrorSessionLiveTests: XCTestCase {
         let homeDifference = home.differingShare(homeReference)
         Self.report(String(format: "Home: %.1f%% differs from the home screen", homeDifference * 100))
         XCTAssertLessThan(homeDifference, 0.15, "Home returned to the home screen")
+
+        // App Switcher (Controls ▸ App Switcher): Home pressed twice in quick
+        // succession, from Settings, shows neither Settings nor the home
+        // screen; Home again leaves it.
+        try await simctl.checked(["launch", udid, "com.apple.Preferences"])
+        try await Task.sleep(for: .seconds(2))
+        await waitForIdle(session, quiet: 1.0, timeout: 10)
+        let inSettings = try XCTUnwrap(Pixels(session.frames.current))
+        session.press(.home, hold: .milliseconds(60))
+        session.press(.home, hold: .milliseconds(60))
+        try await Task.sleep(for: .seconds(1.5))
+        await waitForIdle(session, quiet: 1.0, timeout: 10)
+        let switcher = try XCTUnwrap(Pixels(session.frames.current))
+        let fromSettings = switcher.differingShare(inSettings)
+        let fromHome = switcher.differingShare(homeReference)
+        Self.report(String(format: "App Switcher: %.1f%% differs from Settings, %.1f%% from the home screen",
+                           fromSettings * 100, fromHome * 100))
+        XCTAssertGreaterThan(fromSettings, 0.2, "the app switcher left Settings")
+        XCTAssertGreaterThan(fromHome, 0.2, "the app switcher is not the home screen")
+        try await actions.home()
+        try await Task.sleep(for: .seconds(1.5))
+
+        // Simulate Hardware Keyboard (the bridge's canary): connected and
+        // disconnected again, as a `simctl boot` simulator starts.
+        try await onBackground { try bridge.setHardwareKeyboard(connected: true, for: address) }
+        try await onBackground { try bridge.setHardwareKeyboard(connected: false, for: address) }
 
         let statistics = session.surfaceStatistics()
         Self.report(String(format: "copies upright n=%d p50 %.2f ms p95 %.2f ms; turned n=%d p50 %.2f ms p95 %.2f ms",

@@ -5,7 +5,10 @@ selectors or libxpc simulator functions. This file records, for each one, where
 we learned it: either a file in [facebook/idb](https://github.com/facebook/idb)
 (MIT; credited in `THIRD_PARTY_NOTICES.md`) or "runtime-observed", meaning it
 was read from this Mac's loaded frameworks (Objective-C runtime metadata and
-type encodings) on **CoreSimulator 1171.7** (Xcode 27.0, 27A266a).
+type encodings) on **CoreSimulator 1171.7** (Xcode 27.0, 27A266a). The bridge was
+checked again on **CoreSimulator 1174.9.2** (Xcode 27.1 RC, 27A9275): the smoke
+tool passed every check against an iPhone Duo on iOS 27.1 (24A94232)
+in three runs, each after a fresh boot.
 
 Rules the target follows:
 
@@ -59,6 +62,7 @@ numbers are from that fetch. The idb copies themselves are not part of this repo
 | `-[<SimScreen> screenProperties]` | method | idb `PrivateHeaders/CoreSimDeviceIO/SimScreen-Protocol.h:37` |
 | `-[<SimScreenProperties> screenType]` (`Q`) | method | runtime-observed, CoreSimulator 1171.7 |
 | `-[<SimScreenProperties> screenID]` (`I`) | method | runtime-observed, CoreSimulator 1171.7 |
+| A foldable has two ports of display class 0 (iPhone Duo: the outer panel is screen 1, the inner one screen 3), in no fixed order; the bridge takes the one whose `screenID` the caller names, else the lowest | behaviour | runtime-observed, CoreSimulator 1174.9.2 (the port order changed between boots: one run resolved screen 3, the inner panel, black while the device is folded) |
 | `-[<SimScreenProperties> uiOrientation]` (`I`) | method | runtime-observed, CoreSimulator 1171.7 |
 | `-[<SimScreenProperties> pixelSize]` (`{CGSize=dd}`) | method | runtime-observed, CoreSimulator 1171.7 |
 | Callbacks arrive with `dispatch_sync` on the given queue; `surfacesChanged` fires once after registering and with `(nil, nil)` on shutdown | behaviour | idb `FBSimulatorControl/Framebuffer/FramebufferSurface.swift:43` (`clientQueue.sync`); runtime-observed, CoreSimulator 1171.7 |
@@ -84,6 +88,11 @@ numbers are from that fetch. The idb copies themselves are not part of this repo
 | Home = consumer page 0x0C, usage 0x40 | value | idb `FBSimulatorControl/HID/SimulatorHIDButtonIdentity.swift:59`; verified on iOS 27.0 |
 | Side/lock = 0x0C/0x30, Siri = 0x0C/0xCF, volume up/down = 0x0C/0xE9 and 0x0C/0xEA | values | idb `FBSimulatorControl/HID/SimulatorHIDButtonIdentity.swift:60-72`; runtime-observed on iOS 27.0: 0x30 locks and, pressed again, wakes; 0xE9/0xEA move `sim_volume` in the device's `var/run/simulatoraudio/audiosettings.plist` by one step; 0xCF showed nothing (Siri not set up) |
 | Keyboard modifiers as their own usages (Left Shift 0xE1, Left Option 0xE2, Left GUI 0xE3), held around the key | value | USB HID Usage Tables 1.4, page 0x07 (public); runtime-observed, CoreSimulator 1171.7 (⌘A and ⌘C worked; ⌘V pastes only text copied inside the guest) |
+| `target` is the panel's screen ID: 0 the main screen; iPhone Duo's inner panel (screen 3) took a tap with 3 and with none of 0, 1 or 2 | value | established against Xcode 27.1 RC 27A9275 (CoreSimulator 1174.9.2), iOS 27.1 24A94232 |
+| `IndigoVendorDefinedEvent {usagePage, usage, version, data}` with `featureIdentifier` `com.apple.coredevice.feature.remote.hid.vendordefined`: dtuhidd posts it on its `avpCustom` service, whose `PrimaryUsagePage` 65377 (0xFF61) and `PrimaryUsage` 91 (0x5B) its own log reports | wire format | established against Xcode 27.1 RC 27A9275 (CoreSimulator 1174.9.2), iOS 27.1 24A94232 |
+| The hinge (`SimulatorFold.hingeEvent`): `data` is IOKit's compact XML of `{source: "hinge-slider-control", type: "range", value: <degrees>}`, version 1. The guest's CoreMotion relay logged the angle and SpringBoard the pose: 180 lit iPhone Duo's inner panel, 0 its outer one; a 329-byte XML plist was refused as "Relay payload too large" and a binary plist as an `IOCFUnserialize` syntax error | wire format | established against Xcode 27.1 RC 27A9275 (CoreSimulator 1174.9.2), iOS 27.1 24A94232 |
+| The held orientation (`SimulatorFold.poseEvent`): the same event, `data` `{source: "orientation-picker-control", type: "enum", value: "portrait" \| "pud" \| "landscape-left" \| "landscape-right" \| "faceup" \| "facedown"}`, what Device Hub's Device ▸ Orientation sends: locationd logged "Processing AVP event - Source: orientation-picker-control" and "Orientation set to: 2 (pud)", "5 (faceup)", "6 (facedown)" (`portrait-upside-down`, `upside-down`, `face-up` were not taken). The open iPhone Duo panel's interface turned (Settings went from 2853×2007 to 2007×2853) where the orientation GSEvent changed backboardd's device orientation but left that panel landscape | wire format | established against Xcode 27.1 RC 27A9275 (CoreSimulator 1174.9.2), iOS 27.1 24A94232 |
+| A preset's sweep (`SimulatorFold.sweepAngles`): Device Hub sent about 35 hinge events 17–18 ms apart per preset, easing into the angle (SpringBoard read 129, 136, 147.5, 157.6, 165, 170.7, 174.7, 180 on the way to Open), set portrait before each; SpringBoard read its half open as 127.78°, and reads a sent angle as 5 + angle × 170/180 (100 → 99.44, 128 → 125.89, 130 → 127.78, 150 → 146.67), so it sends 130; a `<real>` hinge value was ignored, whole degrees only | behaviour | established against Xcode 27.1 RC 27A9275 (CoreSimulator 1174.9.2), iOS 27.1 24A94232 |
 | `com.apple.coredevice.dtuhidd.active` (read by the smoke tool, not the bridge) | notify key | runtime-observed, CoreSimulator 1171.7 (`notifyutil -g` read 0 before and 1 after the first connection) |
 
 ## Screen properties read again (`AQSBScreen.m`)
@@ -105,6 +114,19 @@ numbers are from that fetch. The idb copies themselves are not part of this repo
 | `mach_msg(MACH_SEND_MSG \| MACH_SEND_TIMEOUT, …, 2000 ms)`; on `MACH_SEND_TIMED_OUT` nothing was queued | behaviour | idb `FBSimulatorControl/HID/SimulatorPurpleHIDTransport.swift:31-34, 81-116`; public `<mach/message.h>` |
 | The lookup returns a send right the caller owns; `COPY_SEND` leaves it, so the bridge deallocates it after each send | behaviour | runtime-observed, CoreSimulator 1171.7 (the probe's count of this process's port names stayed flat over repeated sends, and every later lookup and send succeeded) |
 
+## Hardware keyboard (`AQSBHardwareKeyboard.m`)
+
+Device ▸ Keyboard ▸ Simulate Hardware Keyboard and its default
+(`SimulatorHardwareKeyboardController`); off with the rest of the bridge
+(`DHP_DISABLE_SIMBRIDGE`). Canary: `SimulatorMirrorSessionLiveTests` connects
+the keyboard and disconnects it again; the same test sends ⌘A and ⌘C as captured shortcuts.
+
+| Name | Kind | Source |
+|---|---|---|
+| `-[SimDevice setHardwareKeyboardEnabled:keyboardType:error:]` | method (`respondsToSelector:` checked; AQSBErrorAPIUnavailable without it) | runtime-observed, CoreSimulator 1171.7 and 1174.9.2: the Objective-C runtime answers it, type encoding `B32@0:8B16C20^@24` (BOOL, unsigned char, NSError **); there is no getter |
+| YES with keyboard type 0 connects the hardware keyboard: in a focused field iOS hides its software keyboard; NO disconnects it and the software keyboard shows again | behaviour | runtime-observed, CoreSimulator 1174.9.2, iPhone Duo on iOS 27.1 (24A94232), 2026-10-10 |
+| A simulator `simctl boot` started has it disconnected | behaviour | same |
+
 ## Not used, on purpose
 
 - SimulatorKit (`SimDeviceLegacyHIDClient`, `IndigoHIDMessageFor*`,
@@ -112,9 +134,11 @@ numbers are from that fetch. The idb copies themselves are not part of this repo
   guests, and nothing here needs it.
 - `-ioSurface` and the single-surface callbacks: removed in CoreSimulator
   1155.4 (they raise "unrecognized selector").
-- DTUHID's vendor-defined orientation event (`IndigoVendorDefinedEvent`,
+- DTUHID's vendor-defined orientation event for phones (`IndigoVendorDefinedEvent`,
   usage page 0xff61, usage 0x5b): the spike's message was accepted and
-  nothing rotated; the GSEvent and devicectl both do.
+  nothing rotated; the GSEvent and devicectl both do. A foldable is turned
+  through it (the orientation picker row above), as the GSEvent does not
+  turn its open panel.
 - `-[SimDevice postDarwinNotification:error:]` (idb's shake): the public
   `simctl spawn <UDID> notifyutil -p com.apple.UIKit.SimulatorShake` does the
   same.
