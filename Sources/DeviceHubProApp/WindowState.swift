@@ -22,6 +22,8 @@ final class WindowState {
         case apps
         case diagnostics
         case controls
+        /// Maestro flows: write and run UI flows on the selected device.
+        case flows
     }
 
     /// Device Hub's Sort By entries, in its order (Availability, then the
@@ -280,6 +282,7 @@ final class WindowState {
         switch button {
         case .controls: return inspectorTab == .controls
         case .diagnostics: return inspectorTab == .diagnostics
+        case .flows: return inspectorTab == .flows
         case .deviceInfo: return inspectorTab.isDeviceInfoSurface
         }
     }

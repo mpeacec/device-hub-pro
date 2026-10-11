@@ -276,6 +276,19 @@ When the tools are installed, the app offers to create your first emulator.
   (Simulator.app: ⌥⌘M / ⌥⌘N). Simulator.app's
   Notification Center and Control Center shortcuts are not offered: no verified way to
   drive them from here yet (a top-edge swipe is available by hand on the live canvas).
+- **Maestro flows.** The inspector's Flows panel (the toolbar's flow button beside Log
+  Focus, or View ▸ Inspectors ▸ Flows, ⌥⌘4) writes and runs [Maestro](https://github.com/mobile-dev-inc/maestro)
+  UI flows on the selected Android emulator or phone, or iPhone or iPad simulator (Maestro does
+  not support physical iPhones, so they get no panel). Flows are plain `.yaml` files in a folder
+  of your own (Application Support/DeviceHubPro/Flows until you choose another, such as your
+  app repository's `.maestro` folder): pick one, edit it (checked with `maestro check-syntax` as
+  you type), and Run saves it and runs `maestro test` on the selected device, showing each step
+  as it completes or fails, with Stop and the run's folder (screenshots, logs) in Finder.
+  Settings ▸ Maestro finds an installed Maestro (`~/.maestro`, the PATH, Homebrew) or installs
+  the tested release (2.11.0) into the app's own folder; it needs Java 17 or newer. Maestro's
+  analytics are turned off for every run. On Android a run installs Maestro's driver apps and
+  removes them afterwards; "Keep Maestro's driver on the device between runs" keeps them for
+  faster repeat runs.
 - **Apps.** Installed apps with their real icons (adaptive icons composited the way
   the launcher shows them), launch, force stop, clear data, App Info and uninstall.
   Install accepts an `.apk` (test-only builds included), a bundletool `.apks` set (the

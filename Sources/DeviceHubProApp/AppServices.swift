@@ -55,6 +55,9 @@ final class AppServices {
     /// clipboard auto-sync: one read per tick, fanned out
     /// to every workspace, instead of one per window.
     let clipboardPoll: ClipboardPasteboardPoll
+    /// Maestro for every window's Flows panel: the CLI, its install and the
+    /// flows folder (Settings ▸ Maestro).
+    let maestro: MaestroSetupController
 
     init(
         adbClient: AdbClient?,
@@ -95,6 +98,7 @@ final class AppServices {
         self.recentAPKs = RecentAPKStore(defaults: environment.defaults)
         self.recentLinks = RecentLinkStore(defaults: environment.defaults)
         self.clipboardPoll = ClipboardPasteboardPoll(pasteboard: environment.pasteboard, isAppActive: environment.isAppActive)
+        self.maestro = MaestroSetupController(tooling: environment.maestro, preferences: preferences)
     }
 
     /// A device's name the way the device list shows it: an adb device's

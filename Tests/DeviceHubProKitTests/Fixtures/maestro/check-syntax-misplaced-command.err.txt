@@ -1,0 +1,1 @@
+Invalid Command: launchApp - tapOn at /syntax-checker:3:3

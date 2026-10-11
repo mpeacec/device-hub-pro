@@ -161,7 +161,7 @@ struct InspectorView: View {
             // (`dh-CT-panel.png`, `inspector-dh-reports-2026-09-28.png`: the panel
             // fills the column with no tab row); the toolbar's sliders / doc /
             // info buttons still switch surfaces.
-            if workspace.window.inspectorTab != .controls && workspace.window.inspectorTab != .diagnostics {
+            if workspace.window.inspectorTab.isDeviceInfoSurface {
                 InspectorSegmentedControl(selection: $window.inspectorTab)
                     .padding(.horizontal, ParityMetrics.inspectorSegmentedSideInset)
                     .padding(.top, ParityMetrics.inspectorSegmentedTopSpacing)
@@ -188,6 +188,8 @@ struct InspectorView: View {
                     DiagnosticsInspectorView()
                 case .controls:
                     ControlsView()
+                case .flows:
+                    FlowsInspectorView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -196,7 +198,16 @@ struct InspectorView: View {
         // an empty Settings panel: the inspector falls to Info.
         .onChange(of: workspace.deviceFamily, initial: true) { leaveControlsIfNoPanel() }
         .onChange(of: workspace.window.inspectorTab) { leaveControlsIfNoPanel() }
+        // A device Maestro cannot drive (a physical iPhone, a watch or TV
+        // simulator) shows no Flows panel: the inspector falls to Info.
+        .onChange(of: workspace.offersFlows, initial: true) { leaveFlowsIfNotOffered() }
+        .onChange(of: workspace.window.inspectorTab) { leaveFlowsIfNotOffered() }
         }
+    }
+
+    private func leaveFlowsIfNotOffered() {
+        guard !workspace.offersFlows, workspace.window.inspectorTab == .flows else { return }
+        workspace.window.inspectorTab = .info
     }
 
     private func leaveControlsIfNoPanel() {

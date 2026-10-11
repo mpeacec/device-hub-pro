@@ -64,6 +64,10 @@ struct AppEnvironment {
     /// Where the saved pushes, deep links and launch options are kept; nil
     /// (every environment but `live()`) keeps them for the process only.
     var libraryDirectory: URL?
+    /// Maestro (the Flows panel's test runner): how the CLI and Java are
+    /// found and where flows and runs live. Nil (every environment but
+    /// `live()`) means no Maestro: nothing is located, run or downloaded.
+    var maestro: MaestroTooling?
 
     /// An environment on exactly these tools. Without `emulatorManagerForPath`
     /// a custom binary path that names no executable falls back to
@@ -83,7 +87,8 @@ struct AppEnvironment {
         screenCapture: any PhysicalScreenCaptureProviding = InertScreenCaptureProvider(),
         adbServiceBrowser: (any AdbServiceBrowsing)? = nil,
         apple: AppleTooling? = nil,
-        libraryDirectory: URL? = nil
+        libraryDirectory: URL? = nil,
+        maestro: MaestroTooling? = nil
     ) {
         self.adbClient = adbClient
         self.emulatorProcesses = emulatorProcesses
@@ -104,6 +109,7 @@ struct AppEnvironment {
         self.screenCapture = screenCapture
         self.adbServiceBrowser = adbServiceBrowser
         self.libraryDirectory = libraryDirectory
+        self.maestro = maestro
     }
 
     /// The app's environment: the adb and emulator found on this Mac (the
@@ -169,7 +175,8 @@ struct AppEnvironment {
                         ?? AppleDeviceKit.defaultRoot
                 )
             ),
-            libraryDirectory: LibraryFile.applicationSupportFolder
+            libraryDirectory: LibraryFile.applicationSupportFolder,
+            maestro: .live()
         )
         environment.isAppActive = { NSApplication.shared.isActive }
         return environment

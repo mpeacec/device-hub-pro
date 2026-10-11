@@ -12,11 +12,13 @@ extension WindowState.InspectorTab {
     }
 }
 
-/// The three buttons of the toolbar's inspector capsule (TB-04).
+/// The three buttons of the toolbar's inspector capsule (TB-04), and the
+/// Flows button of the Log Focus capsule beside it.
 enum InspectorToolbarButton: CaseIterable {
     case controls
     case diagnostics
     case deviceInfo
+    case flows
 }
 
 /// Everything `PixelCatalogModel.refresh(from:)` builds the Pixel list from.

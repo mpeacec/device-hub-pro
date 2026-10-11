@@ -4,6 +4,14 @@ All notable changes to Device Hub Pro are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org).
 
+## [Unreleased]
+
+### Added
+
+- **Maestro flows:** a Flows panel in the inspector to write Maestro `.yaml` flows in a folder
+  of your choice and run them on the selected Android device or iPhone/iPad simulator, with
+  live steps, a syntax check while typing, and Maestro set up from Settings.
+
 ## [1.0.0] - 2026-10-08
 
 The first public release of Device Hub Pro: one Mac app for Android emulators and phones,

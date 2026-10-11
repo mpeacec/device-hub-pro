@@ -63,6 +63,7 @@ final class ShellChromeTests: XCTestCase {
             (.diagnostics, .diagnostics),
             (.info, .deviceInfo),
             (.apps, .deviceInfo),
+            (.flows, .flows),
         ]
         for (tab, lit) in cases {
             let model = model(tab: tab, showing: true)

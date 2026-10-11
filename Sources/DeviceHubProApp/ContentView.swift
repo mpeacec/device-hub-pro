@@ -469,9 +469,21 @@ struct ContentView: View {
     /// menu and View ▸ Inspectors ▸ Settings. Each button lights only while
     /// the inspector shows its surface, and i is the way back to Info/Apps
     /// from Controls or Diagnostics (which hide the segmented control).
-    /// Log focus: the window shows only the phone and the live log.
+    /// Log focus: the window shows only the phone and the live log. Beside
+    /// it, Flows opens the Maestro flows panel, for a device Maestro drives.
     private var logFocusCapsule: some View {
-        ToolbarSegmentedCapsule(
+        let flowsSegments: [ToolbarSegment] = workspace.offersFlows ? [
+            ToolbarSegment(
+                id: "inspector-flows",
+                isActive: workspace.window.isInspectorToolbarButtonActive(.flows),
+                help: "Flows",
+                label: "Flows",
+                action: { workspace.window.selectInspectorTab(.flows) }
+            ) {
+                Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+            },
+        ] : []
+        return ToolbarSegmentedCapsule(
             segments: [
                 ToolbarSegment(
                     id: "log-focus",
@@ -482,9 +494,9 @@ struct ContentView: View {
                 ) {
                     Image(systemName: "text.alignleft")
                 },
-            ],
+            ] + flowsSegments,
             padding: ParityMetrics.toolbarInspectorCapsulePadding,
-            groupLabel: "Log Focus"
+            groupLabel: "Log Focus and Flows"
         )
     }
 

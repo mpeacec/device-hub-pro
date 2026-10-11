@@ -237,6 +237,35 @@ alternative stays the fallback.
 - **Simulator bridge** (`DHP_DISABLE_SIMBRIDGE`, `DHP_SIMBRIDGE_ALLOW_UNTESTED`):
   `Sources/DeviceHubProSimBridge`, provenance in its `PROVENANCE.md`.
 
+## Maestro flows
+
+The Flows panel (inspector ▸ Flows, ⌥⌘4) runs mobile.dev's Maestro CLI, a third-party tool,
+against the selected row's device.
+
+- `maestro` runs only through `MaestroClient` (`Sources/DeviceHubProKit/Maestro/`): always
+  `--device <adb serial | simulator UDID>` from `DeviceWorkspace.flowTarget` (the selected
+  row's device, `menuTargetSerial` for Android, a booted iPhone or iPad simulator), never
+  without it (Maestro would ask on stdin or pick a device itself); stdin closed or fed; with
+  `MAESTRO_CLI_NO_ANALYTICS`, `MAESTRO_DISABLE_UPDATE_CHECK` and
+  `MAESTRO_CLI_ANALYSIS_NOTIFICATION_DISABLED` set. No cloud, login, `--analyze`, AI, `record`,
+  `mcp` or `studio` command is ever run.
+- **Accepted exception (iOS).** Maestro's own iOS driver runs `xcrun simctl <command> <UDID>`
+  and `xcodebuild test-without-building` itself. That is the tool's behaviour, not this
+  repository's code: our sources still never spell `xcrun` or `test-without-building` outside
+  the files named above, and never pass `booted`, `all` or `unavailable`. The panel is not
+  offered for physical iPhones (Maestro 2.11 refuses them) or Apple TV, Watch and Vision
+  simulators.
+- On Android a run installs `dev.mobile.maestro` and `dev.mobile.maestro.test` on the device and
+  removes them afterwards (unless "Keep Maestro's driver on the device between runs" is on), and
+  resets a mock location and proxy it set. Agents run flows only on an emulator or simulator they
+  were asked to use, under the Android and iOS rules above.
+- The CLI the app installs is `MaestroRelease.pinned` (version, URL, sha256), downloaded only when
+  the user presses Install, into `~/Library/Application Support/DeviceHubPro/maestro`. A new pin
+  re-captures `Tests/DeviceHubProKitTests/Fixtures/maestro/` and re-checks `MaestroOutputParser`
+  against that release's `PlainTextResultView`.
+- Tests use a fake `maestro` (`FakeTool`); `AppEnvironment.testing()` has no `maestro`, so a test
+  model never locates, runs or downloads it.
+
 ## Test switches
 
 - `DHP_IOS_DEVICE_LIVE=1` with `DHP_IPHONE_UDID=<hardware UDID>` runs `ApplePhysicalLiveTests`

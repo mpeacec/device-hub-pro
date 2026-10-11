@@ -102,6 +102,9 @@ final class DeviceWorkspace {
     /// lets the physical view's input reach the test iPhone through the
     /// public-XCTest runner. Off by default.
     let physicalControl = PhysicalControlController()
+    /// The Flows panel: the open Maestro flow and its run on the selected
+    /// device.
+    let flows = FlowRunController()
 
     /// The device shown in the center stage.
     var deviceSelection: DeviceSelection? {
@@ -201,6 +204,16 @@ final class DeviceWorkspace {
         wirePhysicalControl()
         wireLifecycle()
         wireAppHooks()
+        wireFlows()
+    }
+
+    /// The Flows panel runs on the selected row's device only
+    /// (`flowTarget`), with the app's Maestro and its settings.
+    private func wireFlows() {
+        flows.setup = services.maestro
+        flows.target = { [weak self] in self?.flowTarget }
+        flows.deviceName = { [weak self] target in self?.flowDeviceName(target) ?? target.deviceID }
+        flows.keepsDriver = { [weak self] in self?.services.preferences.maestroKeepsDriver ?? false }
     }
 
     /// An inert `Hooks` value: every closure a no-op, so the coordinator

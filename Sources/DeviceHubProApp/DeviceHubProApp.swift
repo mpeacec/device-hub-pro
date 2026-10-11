@@ -327,6 +327,13 @@ private struct AppCommands: Commands {
                     Task { @MainActor in workspace?.window.toggleDeviceInfoInspector() }
                 }
                 .keyboardShortcut("3", modifiers: [.command, .option])
+                // Only for a device Maestro drives (an Android device, an iPhone or iPad simulator).
+                if workspace?.offersFlows == true {
+                    Button("Flows") {
+                        Task { @MainActor in workspace?.window.selectInspectorTab(.flows) }
+                    }
+                    .keyboardShortcut("4", modifiers: [.command, .option])
+                }
 
                 Divider()
 

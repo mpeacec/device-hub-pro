@@ -54,6 +54,9 @@ final class AppPreferences {
         static let softKeyboardHintShown = "softKeyboardHintShown"
         static let iosPlatformCardDismissed = "iosPlatformCardDismissed"
         static let iphoneCardDismissed = "iphoneCardDismissed"
+        static let maestroPath = "maestroPath"
+        static let maestroFlowsFolderPath = "maestroFlowsFolderPath"
+        static let maestroKeepsDriver = "maestroKeepsDriver"
 
         /// Every key, in the order above.
         static let all = [
@@ -94,6 +97,9 @@ final class AppPreferences {
             softKeyboardHintShown,
             iosPlatformCardDismissed,
             iphoneCardDismissed,
+            maestroPath,
+            maestroFlowsFolderPath,
+            maestroKeepsDriver,
         ]
     }
 
@@ -196,6 +202,17 @@ final class AppPreferences {
     /// searched). The guided install sets it when it installs outside
     /// Android Studio's default folder. Persisted.
     private(set) var androidSDKPath: String
+    /// The `maestro` launcher chosen in Settings ▸ Maestro ("" = the app's
+    /// own copy, `~/.maestro`, the PATH or Homebrew, `MaestroLocator`).
+    /// Persisted.
+    private(set) var maestroPath: String
+    /// The folder the Flows panel reads and writes ("" = the default folder
+    /// in Application Support, `MaestroFlowFolder.defaultURL`). Persisted.
+    private(set) var maestroFlowsFolderPath: String
+    /// Runs keep the driver Maestro installed on the device last time
+    /// (`--no-reinstall-driver`), which starts a repeat run faster. Persisted;
+    /// off by default, so every run starts from a fresh driver.
+    private(set) var maestroKeepsDriver: Bool
     /// The "Set up Android tools" card was closed with "Don't show again":
     /// the empty stage and the sidebar stop showing it (the toolbar's
     /// warning still opens the setup). Persisted.
@@ -277,6 +294,9 @@ final class AppPreferences {
         stayOnTopMain = defaults.bool(forKey: Keys.stayOnTopMain)
         stayOnTopCompact = defaults.bool(forKey: Keys.stayOnTopCompact)
         androidSDKPath = defaults.string(forKey: Keys.androidSDKPath) ?? ""
+        maestroPath = defaults.string(forKey: Keys.maestroPath) ?? ""
+        maestroFlowsFolderPath = defaults.string(forKey: Keys.maestroFlowsFolderPath) ?? ""
+        maestroKeepsDriver = defaults.bool(forKey: Keys.maestroKeepsDriver)
         androidSetupDismissed = defaults.bool(forKey: Keys.androidSetupDismissed)
         androidReadyCardDismissed = defaults.bool(forKey: Keys.androidReadyCardDismissed)
         localNetworkInUse = defaults.bool(forKey: Keys.localNetworkInUse)
@@ -321,6 +341,29 @@ final class AppPreferences {
         } else {
             defaults.set(path, forKey: Keys.androidSDKPath)
         }
+    }
+
+    func setMaestroPath(_ path: String) {
+        maestroPath = path
+        if path.isEmpty {
+            defaults.removeObject(forKey: Keys.maestroPath)
+        } else {
+            defaults.set(path, forKey: Keys.maestroPath)
+        }
+    }
+
+    func setMaestroFlowsFolderPath(_ path: String) {
+        maestroFlowsFolderPath = path
+        if path.isEmpty {
+            defaults.removeObject(forKey: Keys.maestroFlowsFolderPath)
+        } else {
+            defaults.set(path, forKey: Keys.maestroFlowsFolderPath)
+        }
+    }
+
+    func setMaestroKeepsDriver(_ keeps: Bool) {
+        maestroKeepsDriver = keeps
+        defaults.set(keeps, forKey: Keys.maestroKeepsDriver)
     }
 
     func setXcodeHintDismissed(_ dismissed: Bool) {

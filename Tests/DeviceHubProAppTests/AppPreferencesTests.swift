@@ -50,7 +50,34 @@ final class AppPreferencesTests: XCTestCase {
             "softKeyboardHintShown",
             "iosPlatformCardDismissed",
             "iphoneCardDismissed",
+            "maestroPath",
+            "maestroFlowsFolderPath",
+            "maestroKeepsDriver",
         ])
+    }
+
+    /// The Maestro settings start empty (search the usual places, the default
+    /// flows folder, a fresh driver per run), persist, and an empty path is
+    /// forgotten rather than stored.
+    func testMaestroSettingsPersist() {
+        let defaults = UserDefaults.scratch()
+        let preferences = AppPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.maestroPath, "")
+        XCTAssertEqual(preferences.maestroFlowsFolderPath, "")
+        XCTAssertFalse(preferences.maestroKeepsDriver)
+
+        preferences.setMaestroPath("/opt/tools/maestro/bin/maestro")
+        preferences.setMaestroFlowsFolderPath("/Users/aqauser001/app/.maestro")
+        preferences.setMaestroKeepsDriver(true)
+        let reread = AppPreferences(defaults: defaults)
+        XCTAssertEqual(reread.maestroPath, "/opt/tools/maestro/bin/maestro")
+        XCTAssertEqual(reread.maestroFlowsFolderPath, "/Users/aqauser001/app/.maestro")
+        XCTAssertTrue(reread.maestroKeepsDriver)
+
+        reread.setMaestroPath("")
+        reread.setMaestroFlowsFolderPath("")
+        XCTAssertNil(defaults.object(forKey: "maestroPath"))
+        XCTAssertNil(defaults.object(forKey: "maestroFlowsFolderPath"))
     }
 
     func testClosingTheXcodeCardIsRemembered() {

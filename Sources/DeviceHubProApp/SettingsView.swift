@@ -164,6 +164,10 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Maestro") {
+                MaestroSettingsSection(setup: model.services.maestro, preferences: model.preferences)
+            }
+
             Section("Replay") {
                 Toggle("Keep a replay buffer", isOn: Binding(
                     get: { model.preferences.replayEnabled },
