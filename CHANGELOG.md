@@ -12,6 +12,27 @@ All notable changes to Device Hub Pro are recorded here. The format follows
   of your choice and run them on the selected Android device or iPhone/iPad simulator, with
   live steps, a syntax check while typing, and Maestro set up from Settings.
 
+## [1.1.2] - 2026-10-12
+
+### Added
+
+- **Help ▸ Report a Problem…** and a **Report…** button on error alerts with details: the sheet
+  checks this Mac for causes we know (an emulator made by old Android tools, no hardware
+  virtualization, a missing system image, a second adb, …) and shows each with its fix, and
+  makes a report with the private details left out (user name, Mac name, serial numbers,
+  addresses, tokens), ready to copy, save or open as a GitHub issue. Nothing is sent.
+
+### Fixed
+
+- An emulator now starts and mirrors on a Mac whose `~/.emulator_console_auth_token` is empty
+  (the documented way to switch the emulator console's authentication off). `adb emu` prints
+  nothing for such a console, so the app could not tell which emulator was which: Start waited
+  three minutes for the VM and ended with "did not come online in time" (the VM left running,
+  listed under its model name), and the mirror read "Emulator not responding" and "The emulator
+  isn't sending its screen". The app now talks to the emulator's console itself, authenticating
+  only when the console asks for it, and falls back to the emulator's own boot property for its
+  AVD name; adb is asked only when the console cannot be reached.
+
 ## [1.1.1] - 2026-10-11
 
 ### Added

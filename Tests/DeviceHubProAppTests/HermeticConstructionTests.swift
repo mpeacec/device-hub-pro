@@ -15,6 +15,35 @@ final class HermeticConstructionTests: XCTestCase {
         XCTAssertEqual(model.launchOptions, .none)
     }
 
+    /// A model built for tests never talks to an emulator console on this
+    /// Mac: the adb client a test hands in (`init(adbURL:)`, a stub or a
+    /// fake adb, or `unresolved()` that a test points at a stub adb later,
+    /// as the setup tests do) has no console transport, so the emulator
+    /// console commands the model sends (`avd name`, `avd discoverypath`,
+    /// `kill`, `rotate`…) go to that adb and nowhere else. Only
+    /// `AdbClient.locate()` and `unresolvedForApp()`, which
+    /// `AppEnvironment.live()` uses, dial a console (127.0.0.1, then ::1).
+    func testTestingModelsNeverTalkToAnEmulatorConsole() throws {
+        let stub = try makeStubAdb(arms: "")
+        XCTAssertFalse(stub.client.talksToEmulatorConsoles)
+
+        let fake = AdbClient(adbURL: URL(fileURLWithPath: "/usr/bin/false"))
+        XCTAssertFalse(fake.talksToEmulatorConsoles)
+        XCTAssertFalse(AppModel.testing(adb: fake).adbClient?.talksToEmulatorConsoles ?? false)
+        XCTAssertFalse(AppEnvironment.testing(adb: stub.client).adbClient?.talksToEmulatorConsoles ?? false)
+        XCTAssertNil(AppModel.testing().adbClient)
+
+        let unresolved = AdbClient.unresolved()
+        XCTAssertFalse(unresolved.talksToEmulatorConsoles)
+        let model = AppModel.testing(adb: unresolved)
+        XCTAssertFalse(model.adbClient?.talksToEmulatorConsoles ?? false)
+        XCTAssertFalse(AppEnvironment.testing(adb: unresolved).adbClient?.talksToEmulatorConsoles ?? false)
+        // Resolving it to a stub adb (what adopting the tools does) gives it
+        // no console either.
+        unresolved.resolve(stub.client.adbURL)
+        XCTAssertFalse(unresolved.talksToEmulatorConsoles)
+    }
+
     /// The convenience init takes nil at its word: no adb found on the Mac,
     /// no SDK emulator, no launch options from the runner, and settings
     /// from the defaults it is handed.
@@ -99,6 +128,50 @@ final class HermeticConstructionTests: XCTestCase {
         }
         XCTAssertEqual(hits.count, 3, "\(hits)")
         XCTAssertTrue(hits.allSatisfy { $0.hasPrefix("AppEnvironment.swift:") }, "\(hits)")
+    }
+
+    /// Only `AppEnvironment.live()` reads this Mac for a problem report (its
+    /// home, processes, adb and Xcode) and names the log folder the recent
+    /// problems are written to: a source scan, since the inputs and the file
+    /// URL are defaults no test should reach by leaving a parameter out.
+    func testOnlyTheLiveEnvironmentReadsTheMacForAProblemReport() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sources = root.appendingPathComponent("Sources/DeviceHubProApp", isDirectory: true)
+        var hits: [String: [String]] = ["ProblemReportInputs.live(": [], "RecentProblemStore.liveFileURL(": []]
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
+        for case let url as URL in enumerator where url.pathExtension == "swift" {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            for (index, line) in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated() {
+                let code = String(line)
+                guard !code.trimmingCharacters(in: .whitespaces).hasPrefix("//") else { continue }
+                for needle in hits.keys where code.contains(needle) {
+                    hits[needle, default: []].append("\(url.lastPathComponent):\(index + 1)")
+                }
+            }
+        }
+        for (needle, places) in hits {
+            XCTAssertEqual(places.count, 1, "\(needle) \(places)")
+            XCTAssertTrue(places.allSatisfy { $0.hasPrefix("AppEnvironment.swift:") }, "\(needle) \(places)")
+        }
+    }
+
+    /// A test environment reads nothing from this Mac for a report: inert
+    /// inputs (no home, no adb, no processes) and a log kept in memory.
+    func testTheTestingEnvironmentsReportInputsAreInert() async throws {
+        let environment = AppEnvironment.testing()
+        let inputs = environment.problemReportInputs()
+
+        XCTAssertNil(inputs.adbURL)
+        XCTAssertNil(inputs.emulatorURL)
+        XCTAssertEqual(inputs.homeDirectory.path, "/nonexistent-home")
+        XCTAssertNil(inputs.appLogDirectory)
+        XCTAssertFalse(inputs.processExists(1))
+        let processes = try await inputs.processList()
+        XCTAssertEqual(processes, "")
+        XCTAssertEqual(environment.recentProblems.entries(), [])
     }
 
     func testConvenienceInitNeverLocatesTheTools() {

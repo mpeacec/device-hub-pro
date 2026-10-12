@@ -64,6 +64,15 @@ struct AppEnvironment {
     /// Where the saved pushes, deep links and launch options are kept; nil
     /// (every environment but `live()`) keeps them for the process only.
     var libraryDirectory: URL?
+    /// The errors the app showed lately, for a problem report. Every
+    /// environment but `live()` keeps them in memory only: a test never
+    /// writes the user's log folder.
+    var recentProblems = RecentProblemStore(fileURL: nil)
+    /// What a problem report reads from the Mac, made when a report is asked
+    /// for (not at launch: reading the account's full name and the host names
+    /// is not free). Inert in every environment but `live()`, so a test never
+    /// reads the real home, processes or adb.
+    var problemReportInputs: @Sendable () -> ProblemReportInputs = { ProblemReportInputs.inert }
     /// Maestro (the Flows panel's test runner): how the CLI and Java are
     /// found and where flows and runs live. Nil (every environment but
     /// `live()`) means no Maestro: nothing is located, run or downloaded.
@@ -128,6 +137,11 @@ struct AppEnvironment {
         )
         // The SDK folder the user located earlier, before any locator runs.
         AndroidSDKLocation.applyPreferredRoot(defaults.string(forKey: AppPreferences.Keys.androidSDKPath))
+        // The simulators' crash reports and a problem report's list of them
+        // read the same folder.
+        let diagnosticReportsDirectory = ProcessInfo.processInfo.environment["DHP_DIAGNOSTIC_REPORTS_DIR"]
+            .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? SimulatorCrashReportScanner.userDiagnosticReportsDirectory
         let emulatorManagerForPath: @MainActor (String) -> EmulatorManager? = { path in
             resolveEmulatorManager(
                 path: path,
@@ -136,7 +150,7 @@ struct AppEnvironment {
             )
         }
         var environment = AppEnvironment(
-            adbClient: AdbClient.locate() ?? AdbClient.unresolved(),
+            adbClient: AdbClient.locate() ?? AdbClient.unresolvedForApp(),
             emulatorManager: emulatorManagerForPath(
                 defaults.string(forKey: AppPreferences.Keys.emulatorBinaryPath) ?? ""
             ),
@@ -154,9 +168,7 @@ struct AppEnvironment {
                 deviceSet: nil,
                 devicesDirectory: SimulatorWatcher.defaultDevicesDirectory,
                 logsDirectory: AppleTooling.userLogsDirectory,
-                diagnosticReportsDirectory: ProcessInfo.processInfo.environment["DHP_DIAGNOSTIC_REPORTS_DIR"]
-                    .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
-                    ?? SimulatorCrashReportScanner.userDiagnosticReportsDirectory,
+                diagnosticReportsDirectory: diagnosticReportsDirectory,
                 makeBridge: { toolchain in
                     toolchain.developerDirectory.map { LiveSimulatorBridge(developerDir: $0.path) }
                 },
@@ -179,6 +191,15 @@ struct AppEnvironment {
             maestro: .live()
         )
         environment.isAppActive = { NSApplication.shared.isActive }
+        environment.recentProblems = RecentProblemStore(
+            fileURL: RecentProblemStore.liveFileURL(home: FileManager.default.homeDirectoryForCurrentUser)
+        )
+        environment.problemReportInputs = {
+            // The model fills in the adb and the emulator it uses itself.
+            var inputs = ProblemReportInputs.live(producer: .app, locatesTools: false)
+            inputs.diagnosticReportsDirectory = diagnosticReportsDirectory
+            return inputs
+        }
         return environment
     }
 
